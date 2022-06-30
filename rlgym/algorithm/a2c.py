@@ -9,25 +9,6 @@ class A2C_Base:
         self.gamma = 0.99
         self.lmbda = 0.95
 
-    def gae(self, state, next_state, reward, flags):
-        reward = (reward - reward.mean()) / (reward.std() + 1e-9)
-
-        with torch.no_grad():
-            value_next_state = self.model.critic(next_state).squeeze()
-            value_state = self.model.critic(state).squeeze()
-
-        td_target = reward + self.gamma * value_next_state * (1. - flags)
-        delta = td_target - value_state
-
-        advantages = torch.zeros(reward.size()).to(torch.device("cuda"))
-        adv = 0
-
-        for i in range(delta.size(0) - 1, -1, -1):
-            adv = self.gamma * self.lmbda * adv + delta[i]
-            advantages[i] = adv
-
-        return td_target, advantages
-
     def discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(
             rewards.size()).to(torch.device("cuda"))
@@ -81,7 +62,6 @@ class A2C_Discrete(A2C_Base):
         self.model.cuda()
 
     def act(self, state):
-        # with torch.no_grad():
         state = torch.from_numpy(state).float().unsqueeze(
             0).to(torch.device("cuda"))
         probs = self.model.actor(state)
@@ -93,7 +73,7 @@ class A2C_Discrete(A2C_Base):
 
 class A2C_Continuous(A2C_Base):
     def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
-        super(A2C_Base, self).__init__()
+        super(A2C_Continuous, self).__init__()
 
         self.model = ActorCriticNet_Continuous(num_inputs, action_space, hidden_size, learning_rate)
         self.model.cuda()
@@ -105,7 +85,7 @@ class A2C_Continuous(A2C_Base):
         log_prob = 0
         list_action = []
 
-        list_probs = self.model.forward(state_torch)
+        list_probs = self.model.actor(state_torch)
 
         for probs in list_probs:
             mu = torch.tanh(probs[0])

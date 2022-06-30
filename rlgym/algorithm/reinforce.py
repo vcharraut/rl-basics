@@ -1,6 +1,6 @@
 import torch
 from torch.distributions import Categorical, Normal
-from src.model.neuralnet import LinearNet_Discrete, LinearNet_Continuous
+from rlgym.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
 class REINFORCE_Base:
@@ -67,7 +67,6 @@ class REINFORCE_Continuous(REINFORCE_Base):
     def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
         super(REINFORCE_Continuous, self).__init__()
 
-        print(action_space)
         self.lows = action_space.low
 
         self.model = LinearNet_Continuous(

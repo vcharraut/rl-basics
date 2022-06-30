@@ -83,7 +83,7 @@ class ActorCriticNet_Continuous(nn.Module):
     def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
         super(ActorCriticNet_Continuous, self).__init__()
 
-        num_action_layers = action_space.shape[0]
+        num_actor_layers = action_space.shape[0]
 
         self.nn = nn.Sequential(
             nn.Linear(num_inputs, hidden_size),
@@ -92,7 +92,7 @@ class ActorCriticNet_Continuous(nn.Module):
         )
 
         self.actor_layers = nn.ModuleList(
-            [nn.Linear(hidden_size, 2) for _ in range(num_action_layers)])
+            [nn.Linear(hidden_size, 2) for _ in range(num_actor_layers)])
 
         self.critic_layer = nn.Linear(hidden_size, 1)
 
@@ -103,7 +103,7 @@ class ActorCriticNet_Continuous(nn.Module):
 
         list_mu_sigma = []
 
-        for operation in self.action_layers:
+        for operation in self.actor_layers:
             x = operation(output)
             list_mu_sigma.append(x.squeeze())
 
@@ -115,7 +115,7 @@ class ActorCriticNet_Continuous(nn.Module):
 
         list_mu_sigma = []
 
-        for operation in self.action_layers:
+        for operation in self.actor_layers:
             x = operation(output)
             list_mu_sigma.append(x.squeeze())
 

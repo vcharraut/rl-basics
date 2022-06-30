@@ -1,6 +1,6 @@
-from src.algorithm.reinforce import REINFORCE_Continuous, REINFORCE_Discrete
-from src.algorithm.ppo import PPO_Continuous, PPO_Discrete
-from src.algorithm.a2c import A2C_Discrete, A2C_Continuous
+from rlgym.algorithm.reinforce import REINFORCE_Continuous, REINFORCE_Discrete
+from rlgym.algorithm.ppo import PPO_Continuous, PPO_Discrete
+from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
 
 
 
