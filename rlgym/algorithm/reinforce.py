@@ -1,6 +1,6 @@
 import torch
 from torch.distributions import Categorical, Normal
-from neuralnet import LinearNet_Discrete, LinearNet_Continuous
+from src.model.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
 class REINFORCE_Base:
@@ -24,7 +24,7 @@ class REINFORCE_Base:
 
         return discounted_rewards
 
-    def learn(self, minibatch):
+    def update_policy(self, minibatch):
         rewards = minibatch["rewards"]
         log_probs = minibatch["logprobs"]
 
@@ -53,7 +53,7 @@ class REINFORCE_Discrete(REINFORCE_Base):
             num_inputs, num_actions, hidden_size, learning_rate)
         self.model.cuda()
 
-    def get_action(self, state):
+    def act(self, state):
         state = torch.from_numpy(state).float().unsqueeze(
             0).to(torch.device("cuda"))
         probs = self.model.forward(state)
@@ -74,29 +74,21 @@ class REINFORCE_Continuous(REINFORCE_Base):
             num_inputs, action_space, hidden_size, learning_rate)
         self.model.cuda()
 
-    def get_action(self, state):
-        state_c = state.copy()
+    def act(self, state):
         state_torch = torch.from_numpy(
-            state_c).float().unsqueeze(0).to(torch.device("cuda"))
+            state).float().unsqueeze(0).to(torch.device("cuda"))
 
         log_prob = 0
         list_action = []
 
         list_probs = self.model.forward(state_torch)
 
-        for i, probs in enumerate(list_probs):
-            if self.lows[i] == -1:
-                mu = torch.tanh(probs[0])
-            elif self.lows[i] == 0:
-                mu = torch.sigmoid(probs[0])
-            else:
-                print("action_space.low is not accepted: ", i)
+        for probs in list_probs:
+            mu = torch.tanh(probs[0])
             sigma = torch.sigmoid(probs[1])
             dist = Normal(mu, sigma)
             action = dist.sample()
             log_prob += dist.log_prob(action)
             list_action.append(action.item())
 
-        self.log_probs.append(log_prob)
-
-        return list_action
+        return list_action, log_prob

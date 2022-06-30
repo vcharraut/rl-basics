@@ -1,6 +1,6 @@
 import torch
 from torch.distributions import Categorical, Normal
-from neuralnet import ActorCriticNet
+from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
 
 
 class A2C_Base:
@@ -43,7 +43,7 @@ class A2C_Base:
 
         return discounted_rewards
 
-    def learn(self, minibatch):
+    def update_policy(self, minibatch):
         states = minibatch["states"]
         rewards = minibatch["rewards"]
         log_probs = minibatch["logprobs"]
@@ -76,11 +76,11 @@ class A2C_Discrete(A2C_Base):
 
         num_actions = action_space.n
 
-        self.model = ActorCriticNet(
+        self.model = ActorCriticNet_Discrete(
             num_inputs, num_actions, hidden_size, learning_rate)
         self.model.cuda()
 
-    def get_action(self, state):
+    def act(self, state):
         # with torch.no_grad():
         state = torch.from_numpy(state).float().unsqueeze(
             0).to(torch.device("cuda"))
@@ -95,32 +95,24 @@ class A2C_Continuous(A2C_Base):
     def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
         super(A2C_Base, self).__init__()
 
-        self.lows = action_space.low
+        self.model = ActorCriticNet_Continuous(num_inputs, action_space, hidden_size, learning_rate)
+        self.model.cuda()
 
-        # self.model = LinearNet_Continuous(num_inputs, action_space, hidden_size, learning_rate)
-        # self.model.cuda()
-
-    def get_action(self, state):
-        state_c = state.copy()
+    def act(self, state):
         state_torch = torch.from_numpy(
-            state_c).float().unsqueeze(0).to(torch.device("cuda"))
+            state).float().unsqueeze(0).to(torch.device("cuda"))
 
-        log_probs = 0
+        log_prob = 0
         list_action = []
 
         list_probs = self.model.forward(state_torch)
 
-        for i, probs in enumerate(list_probs):
-            if self.lows[i] == -1:
-                mu = torch.tanh(probs[0])
-            elif self.lows[i] == 0:
-                mu = torch.sigmoid(probs[0])
-            else:
-                print("action_space.low is not accepted: ", i)
+        for probs in list_probs:
+            mu = torch.tanh(probs[0])
             sigma = torch.sigmoid(probs[1])
             dist = Normal(mu, sigma)
             action = dist.sample()
-            log_probs += dist.log_prob(action)
+            log_prob += dist.log_prob(action)
             list_action.append(action.item())
 
-        return list_action, log_probs
+        return list_action, log_prob
