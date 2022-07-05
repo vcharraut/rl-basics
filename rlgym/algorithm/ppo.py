@@ -108,7 +108,7 @@ class PPO_Discrete(PPO_Base):
 
 class PPO_Continuous(PPO_Base):
     def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
-        super(PPO_Base, self).__init__()
+        super(PPO_Continuous, self).__init__()
 
         self.model = ActorCriticNet_Continuous(
             num_inputs, action_space, hidden_size, learning_rate)
@@ -121,7 +121,7 @@ class PPO_Continuous(PPO_Base):
         log_prob = 0
         list_action = []
 
-        list_probs = self.model.forward(state_torch)
+        list_probs = self.model.actor(state_torch)
 
         for probs in list_probs:
             mu = torch.tanh(probs[0])

@@ -3,46 +3,34 @@ from rlgym.algorithm.ppo import PPO_Continuous, PPO_Discrete
 from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
 
 
-
-class Agent:
+class Policy:
     def __init__(self, algorithm, num_inputs, action_space, action_space_type, hidden_size, learning_rate):
         self.action_space = action_space
 
         algorithm = algorithm.lower()
         action_space_type = action_space_type.lower()
 
-        self.continuous = False
+        if action_space_type == "discrete":
+            self.continuous = False
+        elif action_space_type == "box":
+            self.continuous = True
+        else:
+            self.continuous = None
+            # TODO : Add error
+
+        args = [num_inputs, action_space, hidden_size, learning_rate]
 
         if algorithm == "reinforce":
-            if action_space_type == "discrete":
-                self.policy = REINFORCE_Discrete(
-                    num_inputs, action_space, hidden_size, learning_rate)
-            elif action_space_type == "box":
-                self.continuous = True
-                self.policy = REINFORCE_Continuous(
-                    num_inputs, action_space, hidden_size, learning_rate)
+            self.policy = REINFORCE_Continuous(*args) if self.continuous else REINFORCE_Discrete(*args)
 
         elif algorithm == "a2c":
-            if action_space_type == "discrete":
-                self.policy = A2C_Discrete(
-                    num_inputs, action_space, hidden_size, learning_rate)
-            elif action_space_type == "box":
-                self.continuous = True
-                self.policy = A2C_Continuous(
-                    num_inputs, action_space, hidden_size, learning_rate)
-
+            self.policy = A2C_Continuous(*args) if self.continuous else A2C_Discrete(*args)
 
         elif algorithm == "a3c":
             print("Not implemented")
 
         elif algorithm == "ppo":
-            if action_space_type == "discrete":
-                self.policy = PPO_Discrete(
-                    num_inputs, action_space, hidden_size, learning_rate)
-            elif action_space_type == "box":
-                self.continuous = True
-                self.policy = PPO_Continuous(
-                    num_inputs, action_space, hidden_size, learning_rate)
+            self.policy = PPO_Continuous(*args) if self.continuous else PPO_Discrete(*args)
 
         elif algorithm == "dqn":
             print("Not implemented")
