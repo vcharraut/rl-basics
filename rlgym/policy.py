@@ -4,33 +4,30 @@ from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
 
 
 class Policy:
-    def __init__(self, algorithm, num_inputs, action_space, action_space_type, hidden_size, learning_rate):
-        self.action_space = action_space
+
+    def __init__(self, algorithm, num_inputs, action_space, is_continuous,
+                 learning_rate, hidden_size, number_of_layers):
 
         algorithm = algorithm.lower()
-        action_space_type = action_space_type.lower()
-
-        if action_space_type == "discrete":
-            self.continuous = False
-        elif action_space_type == "box":
-            self.continuous = True
-        else:
-            self.continuous = None
-            # TODO : Add error
-
-        args = [num_inputs, action_space, hidden_size, learning_rate]
+        args = [
+            num_inputs, action_space, learning_rate, hidden_size,
+            number_of_layers
+        ]
 
         if algorithm == "reinforce":
-            self.policy = REINFORCE_Continuous(*args) if self.continuous else REINFORCE_Discrete(*args)
+            self.policy = REINFORCE_Continuous(
+                *args) if is_continuous else REINFORCE_Discrete(*args)
 
         elif algorithm == "a2c":
-            self.policy = A2C_Continuous(*args) if self.continuous else A2C_Discrete(*args)
+            self.policy = A2C_Continuous(
+                *args) if is_continuous else A2C_Discrete(*args)
 
         elif algorithm == "a3c":
             print("Not implemented")
 
         elif algorithm == "ppo":
-            self.policy = PPO_Continuous(*args) if self.continuous else PPO_Discrete(*args)
+            self.policy = PPO_Continuous(
+                *args) if is_continuous else PPO_Discrete(*args)
 
         elif algorithm == "dqn":
             print("Not implemented")

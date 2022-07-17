@@ -4,6 +4,7 @@ from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
 
 
 class PPO_Base:
+
     def __init__(self):
         self.model = None
         self.n_optim = 1
@@ -12,6 +13,9 @@ class PPO_Base:
         self.eps_clip = 0.2
         self.value_constant = 0.5
         self.entropy_constant = 0.01
+
+    def evaluate(self, states, actions):
+        pass
 
     def gae(self, state, next_state, reward, flags):
         reward = (reward - reward.mean()) / (reward.std() + 1e-9)
@@ -23,9 +27,6 @@ class PPO_Base:
         td_target = reward + self.gamma * value_next_state * (1. - flags)
         delta = td_target - value_state
 
-        # advantages = torch.zeros(reward.size(), device=self.device)
-        # adv = torch.zeros(reward.size(0), device=self.device)
-
         advantages = torch.zeros(reward.size()).to(torch.device("cuda"))
         adv = 0
 
@@ -34,17 +35,6 @@ class PPO_Base:
             advantages[i] = adv
 
         return td_target, advantages
-
-    def evaluate(self, states, actions):
-        action_prob, state_values = self.model.actor_critic(states)
-
-        action_dist = Categorical(action_prob)
-
-        log_prob = action_dist.log_prob(actions)
-
-        dist_entropy = action_dist.entropy()
-
-        return log_prob, dist_entropy, state_values
 
     def update_policy(self, minibatch):
         states = minibatch["states"]
@@ -87,18 +77,32 @@ class PPO_Base:
 
 
 class PPO_Discrete(PPO_Base):
-    def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
+
+    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
+                 number_of_layers):
         super(PPO_Discrete, self).__init__()
 
         num_actions = action_space.n
 
-        self.model = ActorCriticNet_Discrete(
-            num_inputs, num_actions, hidden_size, learning_rate)
+        self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
+                                             learning_rate, hidden_size,
+                                             number_of_layers)
         self.model.cuda()
 
+    def evaluate(self, states, actions):
+        action_prob, state_values = self.model.actor_critic(states)
+
+        action_dist = Categorical(action_prob)
+
+        log_prob = action_dist.log_prob(actions)
+
+        dist_entropy = action_dist.entropy()
+
+        return log_prob, dist_entropy, state_values
+
     def act(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(
-            0).to(torch.device("cuda"))
+        state = torch.from_numpy(state).float().unsqueeze(0).to(
+            torch.device("cuda"))
         probs = self.model.actor(state).detach()
         dist = Categorical(probs)
         action = dist.sample()
@@ -107,28 +111,37 @@ class PPO_Discrete(PPO_Base):
 
 
 class PPO_Continuous(PPO_Base):
-    def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
+
+    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
+                 number_of_layers):
         super(PPO_Continuous, self).__init__()
 
-        self.model = ActorCriticNet_Continuous(
-            num_inputs, action_space, hidden_size, learning_rate)
+        self.model = ActorCriticNet_Continuous(num_inputs, action_space,
+                                               learning_rate, hidden_size,
+                                               number_of_layers)
         self.model.cuda()
 
+    def evaluate(self, states, actions):
+        actor_value, state_values = self.model.actor_critic(states)
+
+        mu = torch.tanh(actor_value[:, 0])
+        sigma = torch.sigmoid(actor_value[:, 1])
+        dist = Normal(mu, sigma)
+        log_prob = dist.log_prob(actions)
+        dist_entropy = dist.entropy()
+
+        return log_prob, dist_entropy, state_values
+
     def act(self, state):
-        state_torch = torch.from_numpy(
-            state).float().unsqueeze(0).to(torch.device("cuda"))
+        state_torch = torch.from_numpy(state).float().unsqueeze(0).to(
+            torch.device("cuda"))
 
-        log_prob = 0
-        list_action = []
+        actor_value = self.model.actor(state_torch)
 
-        list_probs = self.model.actor(state_torch)
+        mu = torch.tanh(actor_value[:, 0])
+        sigma = torch.sigmoid(actor_value[:, 1])
+        dist = Normal(mu, sigma)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
 
-        for probs in list_probs:
-            mu = torch.tanh(probs[0])
-            sigma = torch.sigmoid(probs[1])
-            dist = Normal(mu, sigma)
-            action = dist.sample()
-            log_prob += dist.log_prob(action)
-            list_action.append(action.item())
-
-        return list_action, log_prob
+        return action.item(), log_prob

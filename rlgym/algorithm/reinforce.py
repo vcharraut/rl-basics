@@ -4,23 +4,23 @@ from rlgym.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
 class REINFORCE_Base:
+
     def __init__(self):
         self.model = None
         self.gamma = 0.99
         self.log_probs = []
 
     def discounted_rewards(self, rewards):
-        discounted_rewards = torch.zeros(
-            rewards.size()).to(torch.device("cuda"))
+        discounted_rewards = torch.zeros(rewards.size()).to(
+            torch.device("cuda"))
         Gt = 0
 
         for i in range(rewards.size(0) - 1, -1, -1):
             Gt = rewards[i] * self.gamma + Gt
             discounted_rewards[i] = Gt
 
-        discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
-            discounted_rewards.std() + 1e-9
-        )
+        discounted_rewards = (discounted_rewards - discounted_rewards.mean()
+                              ) / (discounted_rewards.std() + 1e-9)
 
         return discounted_rewards
 
@@ -44,18 +44,20 @@ class REINFORCE_Base:
 
 
 class REINFORCE_Discrete(REINFORCE_Base):
-    def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
+
+    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
+                 number_of_layers):
         super(REINFORCE_Discrete, self).__init__()
 
         num_actions = action_space.n
 
-        self.model = LinearNet_Discrete(
-            num_inputs, num_actions, hidden_size, learning_rate)
+        self.model = LinearNet_Discrete(num_inputs, num_actions, learning_rate,
+                                        hidden_size, number_of_layers)
         self.model.cuda()
 
     def act(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(
-            0).to(torch.device("cuda"))
+        state = torch.from_numpy(state).float().unsqueeze(0).to(
+            torch.device("cuda"))
         probs = self.model.forward(state)
         dist = Categorical(probs)
         action = dist.sample()
@@ -64,30 +66,28 @@ class REINFORCE_Discrete(REINFORCE_Base):
 
 
 class REINFORCE_Continuous(REINFORCE_Base):
-    def __init__(self, num_inputs, action_space, hidden_size, learning_rate):
+
+    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
+                 number_of_layers):
         super(REINFORCE_Continuous, self).__init__()
 
         self.lows = action_space.low
 
-        self.model = LinearNet_Continuous(
-            num_inputs, action_space, hidden_size, learning_rate)
+        self.model = LinearNet_Continuous(num_inputs, action_space,
+                                          learning_rate, hidden_size,
+                                          number_of_layers)
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(
-            state).float().unsqueeze(0).to(torch.device("cuda"))
+        state_torch = torch.from_numpy(state).float().unsqueeze(0).to(
+            torch.device("cuda"))
 
-        log_prob = 0
-        list_action = []
+        actor_value = self.model.forward(state_torch)
 
-        list_probs = self.model.forward(state_torch)
+        mu = torch.tanh(actor_value[0])
+        sigma = torch.sigmoid(actor_value[1])
+        dist = Normal(mu, sigma)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
 
-        for probs in list_probs:
-            mu = torch.tanh(probs[0])
-            sigma = torch.sigmoid(probs[1])
-            dist = Normal(mu, sigma)
-            action = dist.sample()
-            log_prob += dist.log_prob(action)
-            list_action.append(action.item())
-
-        return list_action, log_prob
+        return action.item(), log_prob
