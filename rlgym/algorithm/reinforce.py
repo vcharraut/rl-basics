@@ -1,5 +1,6 @@
 import torch
 from torch.distributions import Categorical, Normal
+from torch.nn.functional import softmax
 from rlgym.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
@@ -56,12 +57,13 @@ class REINFORCE_Discrete(REINFORCE_Base):
         self.model.cuda()
 
     def act(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(
-            torch.device("cuda"))
-        probs = self.model.forward(state)
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
+        actor_value = self.model.forward(state_torch)
+        probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
         action = dist.sample()
         logprob = dist.log_prob(action)
+
         return action.item(), logprob
 
 

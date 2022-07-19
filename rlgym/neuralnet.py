@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.optim as optim
-from torch.nn.functional import softmax, relu
+from torch.nn.functional import softmax
 
 
 class LinearNet_Discrete(nn.Module):
@@ -17,11 +17,13 @@ class LinearNet_Discrete(nn.Module):
                 for _ in range(number_of_layers - 1)
             ])
 
+        self.actor_layer = nn.Linear(hidden_size, num_actions)
+
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
     def forward(self, state):
-        x = softmax(self.nn(state), dim=1)
-        return x
+        output = self.nn(state)
+        return self.actor_layer(output)
 
 
 class LinearNet_Continuous(nn.Module):
@@ -42,10 +44,7 @@ class LinearNet_Continuous(nn.Module):
 
     def forward(self, state):
         output = self.nn(state)
-
-        actor_value = self.actor_layer(output)
-
-        return actor_value
+        return self.actor_layer(output)
 
 
 class ActorCriticNet_Discrete(nn.Module):
@@ -69,19 +68,14 @@ class ActorCriticNet_Discrete(nn.Module):
 
     def actor_critic(self, state):
         output = self.nn(state)
-
-        actor_value = softmax(self.actor_layer(output), dim=1)
-        critic_value = self.critic_layer(output)
-        return actor_value, critic_value
+        return self.actor_layer(output), self.critic_layer(output)
 
     def actor(self, state):
         output = self.nn(state)
-
-        return softmax(self.actor_layer(output), dim=1)
+        return self.actor_layer(output)
 
     def critic(self, state):
         output = self.nn(state)
-
         return self.critic_layer(output)
 
 
@@ -105,26 +99,12 @@ class ActorCriticNet_Continuous(nn.Module):
 
     def actor_critic(self, state):
         output = self.nn(state)
-
-        actor_value = self.actor_layer(output)
-
-        critic_value = self.critic_layer(output)
-
-        return actor_value, critic_value
+        return self.actor_layer(output), self.critic_layer(output)
 
     def actor(self, state):
         output = self.nn(state)
-
-        actor_value = self.actor_layer(output)
-
-
-        # if mu_value != mu_value:
-        #     print("- state: ", state)
-        #     print("- output: ", output)
-
-        return actor_value
+        return self.actor_layer(output)
 
     def critic(self, state):
         output = self.nn(state)
-
         return self.critic_layer(output)

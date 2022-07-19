@@ -1,7 +1,6 @@
 import torch
-from torch.nn.functional import softplus
+from torch.nn.functional import softmax
 from torch.distributions import Categorical, Normal
-from torch import autograd
 from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
 
 
@@ -29,21 +28,21 @@ class A2C_Base:
         states = minibatch["states"]
         rewards = minibatch["rewards"]
         log_probs = minibatch["logprobs"]
-        
+
         discounted_rewards = self.discounted_rewards(rewards)
 
-        values = self.model.critic(states)
+        values = self.model.critic(states).squeeze()
 
         advantages = (discounted_rewards - values)
 
         policy_loss = (-log_probs * advantages)
-        value_loss = (advantages**2)
+        value_loss = torch.pow(advantages, 2)
 
         loss = (policy_loss + value_loss).mean()
 
         self.model.optimizer.zero_grad()
-        with autograd.detect_anomaly():
-            loss.backward()
+        # with autograd.detect_anomaly():
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.01)
         self.model.optimizer.step()
 
@@ -68,9 +67,9 @@ class A2C_Discrete(A2C_Base):
         self.model.cuda()
 
     def act(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(
-            torch.device("cuda"))
-        probs = self.model.actor(state)
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
+        actor_value = self.model.actor(state_torch)
+        probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
         action = dist.sample()
         logprob = dist.log_prob(action)
@@ -89,11 +88,12 @@ class A2C_Continuous(A2C_Base):
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
+        state_torch = torch.from_numpy(state).float().to(
+            torch.device("cuda")).unsqueeze(0)
 
         actor_value = self.model.actor(state_torch)
         mu = torch.tanh(actor_value[0]) * 2.0
-        sigma = softplus(actor_value[1])
+        sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
 
         action = dist.sample()

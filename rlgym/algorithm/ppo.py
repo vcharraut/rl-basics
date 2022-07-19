@@ -1,5 +1,6 @@
 import torch
 from torch.distributions import Categorical, Normal
+from torch.nn.functional import softmax
 from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
 
 
@@ -38,7 +39,7 @@ class PPO_Base:
 
     def update_policy(self, minibatch):
         states = minibatch["states"]
-        actions = minibatch["actions"]
+        actions = minibatch["actions"].squeeze()  # ONLY 1 ACTION
         next_states = minibatch["next_states"]
         rewards = minibatch["rewards"]
         flags = minibatch["flags"]
@@ -90,7 +91,9 @@ class PPO_Discrete(PPO_Base):
         self.model.cuda()
 
     def evaluate(self, states, actions):
-        action_prob, state_values = self.model.actor_critic(states)
+        action_values, state_values = self.model.actor_critic(states)
+
+        action_prob = softmax(action_values, dim=1)
 
         action_dist = Categorical(action_prob)
 
@@ -98,12 +101,14 @@ class PPO_Discrete(PPO_Base):
 
         dist_entropy = action_dist.entropy()
 
-        return log_prob, dist_entropy, state_values
+        return log_prob, dist_entropy, state_values.squeeze()
 
     def act(self, state):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(
-            torch.device("cuda"))
-        probs = self.model.actor(state).detach()
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
+
+        actor_value = self.model.actor(state_torch)
+
+        probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
         action = dist.sample()
         logprob = dist.log_prob(action)
@@ -130,16 +135,16 @@ class PPO_Continuous(PPO_Base):
         log_prob = dist.log_prob(actions)
         dist_entropy = dist.entropy()
 
-        return log_prob, dist_entropy, state_values
+        return log_prob, dist_entropy, state_values.squeeze()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().unsqueeze(0).to(
-            torch.device("cuda"))
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
 
-        actor_value = self.model.actor(state_torch)
+        with torch.no_grad():
+            actor_value = self.model.actor(state_torch)
 
-        mu = torch.tanh(actor_value[:, 0])
-        sigma = torch.sigmoid(actor_value[:, 1])
+        mu = torch.tanh(actor_value[0])
+        sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
         action = dist.sample()
         log_prob = dist.log_prob(action)
