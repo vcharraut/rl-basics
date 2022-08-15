@@ -1,14 +1,14 @@
 import torch
+from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
-from torch.nn.functional import softmax
-from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
+from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
 
 
 class PPO_Base:
 
     def __init__(self):
         self.model = None
-        self.n_optim = 1
+        self.n_optim = 3
         self.gamma = 0.99
         self.lmbda = 0.95
         self.eps_clip = 0.2
@@ -39,7 +39,7 @@ class PPO_Base:
 
     def update_policy(self, minibatch):
         states = minibatch["states"]
-        actions = minibatch["actions"].squeeze()  # ONLY 1 ACTION
+        actions = minibatch["actions"]
         next_states = minibatch["next_states"]
         rewards = minibatch["rewards"]
         flags = minibatch["flags"]
@@ -80,18 +80,19 @@ class PPO_Base:
 class PPO_Discrete(PPO_Base):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers):
+                 number_of_layers, is_dual):
         super(PPO_Discrete, self).__init__()
 
         num_actions = action_space.n
 
         self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
                                              learning_rate, hidden_size,
-                                             number_of_layers)
+                                             number_of_layers, is_dual)
         self.model.cuda()
 
     def evaluate(self, states, actions):
-        action_values, state_values = self.model.actor_critic(states)
+        action_values = self.model.actor(states)
+        state_values = self.model.critic(states).squeeze()
 
         action_prob = softmax(action_values, dim=1)
 
@@ -101,17 +102,19 @@ class PPO_Discrete(PPO_Base):
 
         dist_entropy = action_dist.entropy()
 
-        return log_prob, dist_entropy, state_values.squeeze()
+        return log_prob, dist_entropy, state_values
 
     def act(self, state):
         state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
 
-        actor_value = self.model.actor(state_torch)
+        with torch.no_grad():
+            actor_value = self.model.actor(state_torch)
 
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
         action = dist.sample()
         logprob = dist.log_prob(action)
+
         return action.item(), logprob
 
 
@@ -140,8 +143,8 @@ class PPO_Continuous(PPO_Base):
     def act(self, state):
         state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
 
-        with torch.no_grad():
-            actor_value = self.model.actor(state_torch)
+        # with torch.no_grad():
+        actor_value = self.model.actor(state_torch)
 
         mu = torch.tanh(actor_value[0])
         sigma = torch.sigmoid(actor_value[1])

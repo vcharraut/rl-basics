@@ -1,14 +1,14 @@
 import torch
-from torch.nn.functional import softmax
+from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
-from rlgym.neuralnet import ActorCriticNet_Discrete, ActorCriticNet_Continuous
+from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
 
 
 class A2C_Base:
 
     def __init__(self):
         self.model = None
-        self.gamma = 0.99
+        self.gamma = 0.9
 
     def discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(rewards.size()).to(
@@ -20,7 +20,7 @@ class A2C_Base:
             discounted_rewards[i] = Gt
 
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()
-                              ) / (discounted_rewards.std() + 1e-9)
+                              ) / (discounted_rewards.std() + 1e-7)
 
         return discounted_rewards
 
@@ -33,17 +33,15 @@ class A2C_Base:
 
         values = self.model.critic(states).squeeze()
 
-        advantages = (discounted_rewards - values)
+        advantages = (discounted_rewards - values).detach()
 
-        policy_loss = (-log_probs * advantages)
-        value_loss = torch.pow(advantages, 2)
+        policy_loss = (-log_probs * advantages).mean()
+        value_loss = mse_loss(values, discounted_rewards)
 
-        loss = (policy_loss + value_loss).mean()
+        loss = (policy_loss + value_loss)
 
         self.model.optimizer.zero_grad()
-        # with autograd.detect_anomaly():
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.01)
         self.model.optimizer.step()
 
     def save_model(self, path):
@@ -56,14 +54,14 @@ class A2C_Base:
 class A2C_Discrete(A2C_Base):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers):
+                 number_of_layers, is_dual):
         super(A2C_Discrete, self).__init__()
 
         num_actions = action_space.n
 
         self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
                                              learning_rate, hidden_size,
-                                             number_of_layers)
+                                             number_of_layers, is_dual)
         self.model.cuda()
 
     def act(self, state):
@@ -88,8 +86,7 @@ class A2C_Continuous(A2C_Base):
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(
-            torch.device("cuda")).unsqueeze(0)
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
 
         actor_value = self.model.actor(state_torch)
         mu = torch.tanh(actor_value[0]) * 2.0
