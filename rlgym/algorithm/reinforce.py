@@ -71,7 +71,7 @@ class REINFORCE_Continuous(REINFORCE):
                  number_of_layers, shared_layers):
         super(REINFORCE_Continuous, self).__init__()
 
-        self.lows = action_space.low
+        self.bound_interval = torch.Tensor(action_space.high).cuda()
 
         self.model = LinearNet_Continuous(num_inputs, action_space,
                                           learning_rate, hidden_size,
@@ -83,10 +83,11 @@ class REINFORCE_Continuous(REINFORCE):
 
         actor_value = self.model(state_torch)
 
-        mu = torch.tanh(actor_value[0]) * 2.0
+        mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
+
         action = dist.sample()
-        log_prob = dist.log_prob(action)
+        log_prob = dist.log_prob(action).sum()
 
         return action.cpu().numpy(), log_prob

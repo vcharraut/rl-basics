@@ -150,6 +150,6 @@ class PPO_Continuous(PPO):
         sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
         action = dist.sample()
-        log_prob = dist.log_prob(action)
+        log_prob = dist.log_prob(action).sum()
 
-        return action.cpu().numpy(), log_prob.sum()
+        return action.cpu().numpy(), log_prob
