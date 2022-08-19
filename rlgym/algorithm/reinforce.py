@@ -1,17 +1,19 @@
 import torch
 from torch.distributions import Categorical, Normal
 from torch.nn.functional import softmax
+from rlgym.algorithm.base import Base
 from rlgym.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
-class REINFORCE_Base:
+class REINFORCE:
 
     def __init__(self):
+        super(REINFORCE, self).__init__()
+
         self.model = None
         self.gamma = 0.99
-        self.log_probs = []
 
-    def discounted_rewards(self, rewards):
+    def _discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(rewards.size()).to(
             torch.device("cuda"))
         Gt = 0
@@ -29,7 +31,7 @@ class REINFORCE_Base:
         rewards = minibatch["rewards"]
         log_probs = minibatch["logprobs"]
 
-        discounted_rewards = self.discounted_rewards(rewards)
+        discounted_rewards = self._discounted_rewards(rewards)
 
         loss = (-log_probs * discounted_rewards).mean()
 
@@ -37,17 +39,11 @@ class REINFORCE_Base:
         loss.backward()
         self.model.optimizer.step()
 
-    def save_model(self, path):
-        torch.save(self.model.state_dict(), path)
 
-    def load_model(self, path):
-        self.model.load_state_dict(torch.load(path))
-
-
-class REINFORCE_Discrete(REINFORCE_Base):
+class REINFORCE_Discrete(REINFORCE):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers):
+                 number_of_layers, shared_layers):
         super(REINFORCE_Discrete, self).__init__()
 
         num_actions = action_space.n
@@ -58,7 +54,9 @@ class REINFORCE_Discrete(REINFORCE_Base):
 
     def act(self, state):
         state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-        actor_value = self.model.forward(state_torch)
+
+        actor_value = self.model(state_torch)
+
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
         action = dist.sample()
@@ -67,10 +65,10 @@ class REINFORCE_Discrete(REINFORCE_Base):
         return action.item(), logprob
 
 
-class REINFORCE_Continuous(REINFORCE_Base):
+class REINFORCE_Continuous(REINFORCE):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers):
+                 number_of_layers, shared_layers):
         super(REINFORCE_Continuous, self).__init__()
 
         self.lows = action_space.low
@@ -81,12 +79,11 @@ class REINFORCE_Continuous(REINFORCE_Base):
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().unsqueeze(0).to(
-            torch.device("cuda"))
+        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
 
-        actor_value = self.model.forward(state_torch)
+        actor_value = self.model(state_torch)
 
-        mu = torch.tanh(actor_value[0])
+        mu = torch.tanh(actor_value[0]) * 2.0
         sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
         action = dist.sample()

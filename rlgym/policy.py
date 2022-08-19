@@ -6,12 +6,12 @@ from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
 class Policy:
 
     def __init__(self, algorithm, num_inputs, action_space, is_continuous,
-                 learning_rate, hidden_size, number_of_layers, is_dual):
+                 learning_rate, hidden_size, number_of_layers, shared_layers):
 
         algorithm = algorithm.lower()
         args = [
             num_inputs, action_space, learning_rate, hidden_size,
-            number_of_layers, is_dual
+            number_of_layers, shared_layers
         ]
 
         if algorithm == "reinforce":
