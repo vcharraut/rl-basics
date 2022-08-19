@@ -43,7 +43,7 @@ class REINFORCE:
 class REINFORCE_Discrete(REINFORCE):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(REINFORCE_Discrete, self).__init__()
 
         num_actions = action_space.n
@@ -53,12 +53,11 @@ class REINFORCE_Discrete(REINFORCE):
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-
-        actor_value = self.model(state_torch)
+        actor_value = self.model(state)
 
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
+
         action = dist.sample()
         logprob = dist.log_prob(action)
 
@@ -68,7 +67,7 @@ class REINFORCE_Discrete(REINFORCE):
 class REINFORCE_Continuous(REINFORCE):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(REINFORCE_Continuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
@@ -79,9 +78,7 @@ class REINFORCE_Continuous(REINFORCE):
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-
-        actor_value = self.model(state_torch)
+        actor_value = self.model(state)
 
         mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])

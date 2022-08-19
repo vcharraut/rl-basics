@@ -58,14 +58,14 @@ class LinearNet_Continuous(nn.Module):
 class ActorCriticNet_Discrete(nn.Module):
 
     def __init__(self, num_inputs, num_actions, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(ActorCriticNet_Discrete, self).__init__()
 
         self.actor_nn = None
         self.critic_nn = None
         self.optimizer = None
 
-        if shared_layers:
+        if is_shared_network:
             base_nn = nn.Sequential(
                 nn.Linear(num_inputs, hidden_size), *[
                     nn.Linear(hidden_size, hidden_size)
@@ -109,7 +109,7 @@ class ActorCriticNet_Discrete(nn.Module):
 class ActorCriticNet_Continuous(nn.Module):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(ActorCriticNet_Continuous, self).__init__()
 
         self.actor_nn = None
@@ -121,7 +121,7 @@ class ActorCriticNet_Continuous(nn.Module):
         mean_sigma_layer = Parallel(nn.Linear(hidden_size, num_action),
                                     nn.Linear(hidden_size, num_action))
 
-        if shared_layers:
+        if is_shared_network:
             base_nn = nn.Sequential(
                 nn.Linear(num_inputs, hidden_size), *[
                     nn.Linear(hidden_size, hidden_size)
@@ -158,5 +158,4 @@ class ActorCriticNet_Continuous(nn.Module):
         return self.actor_nn(state)
 
     def critic(self, state):
-        state = state.float()
         return self.critic_nn(state)

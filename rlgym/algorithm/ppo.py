@@ -77,14 +77,14 @@ class PPO:
 class PPO_Discrete(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(PPO_Discrete, self).__init__()
 
         num_actions = action_space.n
 
         self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
                                              learning_rate, hidden_size,
-                                             number_of_layers, shared_layers)
+                                             number_of_layers, is_shared_network)
         self.model.cuda()
 
     def _evaluate(self, states, actions):
@@ -102,13 +102,12 @@ class PPO_Discrete(PPO):
         return log_prob, dist_entropy, state_values
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-
         with torch.no_grad():
-            actor_value = self.model.actor(state_torch)
+            actor_value = self.model.actor(state)
 
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
+
         action = dist.sample()
         logprob = dist.log_prob(action)
 
@@ -118,14 +117,14 @@ class PPO_Discrete(PPO):
 class PPO_Continuous(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(PPO_Continuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
         self.model = ActorCriticNet_Continuous(num_inputs, action_space,
                                                learning_rate, hidden_size,
-                                               number_of_layers, shared_layers)
+                                               number_of_layers, is_shared_network)
         self.model.cuda()
 
     def _evaluate(self, states, actions):
@@ -135,20 +134,20 @@ class PPO_Continuous(PPO):
         mu = torch.tanh(action_values[0])
         sigma = torch.sigmoid(action_values[1])
         dist = Normal(mu, sigma)
+
         log_prob = dist.log_prob(actions).sum(dim=1)
         dist_entropy = dist.entropy().sum(dim=1)
 
         return log_prob, dist_entropy, state_values
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-
         with torch.no_grad():
-            actor_value = self.model.actor(state_torch)
+            actor_value = self.model.actor(state)
 
         mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])
         dist = Normal(mu, sigma)
+
         action = dist.sample()
         log_prob = dist.log_prob(action).sum()
 

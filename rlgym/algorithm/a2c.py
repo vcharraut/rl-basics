@@ -51,43 +51,43 @@ class A2C(Base):
 class A2C_Discrete(A2C):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(A2C_Discrete, self).__init__()
 
         num_actions = action_space.n
 
         self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
                                              learning_rate, hidden_size,
-                                             number_of_layers, shared_layers)
+                                             number_of_layers, is_shared_network)
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-        actor_value = self.model.actor(state_torch)
+        actor_value = self.model.actor(state)
+
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
+
         action = dist.sample()
         logprob = dist.log_prob(action)
+
         return action.item(), logprob
 
 
 class A2C_Continuous(A2C):
 
     def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, shared_layers):
+                 number_of_layers, is_shared_network):
         super(A2C_Continuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
         self.model = ActorCriticNet_Continuous(num_inputs, action_space,
                                                learning_rate, hidden_size,
-                                               number_of_layers, shared_layers)
+                                               number_of_layers, is_shared_network)
         self.model.cuda()
 
     def act(self, state):
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-
-        actor_value = self.model.actor(state_torch)
+        actor_value = self.model.actor(state)
 
         mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])
