@@ -89,4 +89,4 @@ class REINFORCE_Continuous(REINFORCE):
         action = dist.sample()
         log_prob = dist.log_prob(action)
 
-        return action.item(), log_prob
+        return action.cpu().numpy(), log_prob
