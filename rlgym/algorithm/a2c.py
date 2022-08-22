@@ -10,8 +10,7 @@ class A2C(Base):
     def __init__(self):
         super(A2C, self).__init__()
 
-        self.model = None
-        self.gamma = 0.9
+        self.__gamma = 0.9
 
     def _discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(rewards.size()).to(
@@ -19,7 +18,7 @@ class A2C(Base):
         Gt = 0
 
         for i in range(rewards.size(0) - 1, -1, -1):
-            Gt = rewards[i] * self.gamma + Gt
+            Gt = rewards[i] * self.__gamma + Gt
             discounted_rewards[i] = Gt
 
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()
@@ -34,18 +33,19 @@ class A2C(Base):
 
         discounted_rewards = self._discounted_rewards(rewards)
 
-        values = self.model.critic(states).squeeze()
+        values = self._model.critic(states).squeeze()
 
-        advantages = (discounted_rewards - values).detach()
+        with torch.no_grad():
+            advantages = (discounted_rewards - values)
 
         policy_loss = (-log_probs * advantages).mean()
         value_loss = mse_loss(values, discounted_rewards)
 
         loss = (policy_loss + value_loss)
 
-        self.model.optimizer.zero_grad()
+        self._model.optimizer.zero_grad()
         loss.backward()
-        self.model.optimizer.step()
+        self._model.optimizer.step()
 
 
 class A2C_Discrete(A2C):
@@ -56,13 +56,13 @@ class A2C_Discrete(A2C):
 
         num_actions = action_space.n
 
-        self.model = ActorCriticNet_Discrete(num_inputs, num_actions,
+        self._model = ActorCriticNet_Discrete(num_inputs, num_actions,
                                              learning_rate, hidden_size,
                                              number_of_layers, is_shared_network)
-        self.model.cuda()
+        self._model.cuda()
 
     def act(self, state):
-        actor_value = self.model.actor(state)
+        actor_value = self._model.actor(state)
 
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
@@ -81,13 +81,13 @@ class A2C_Continuous(A2C):
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self.model = ActorCriticNet_Continuous(num_inputs, action_space,
+        self._model = ActorCriticNet_Continuous(num_inputs, action_space,
                                                learning_rate, hidden_size,
                                                number_of_layers, is_shared_network)
-        self.model.cuda()
+        self._model.cuda()
 
     def act(self, state):
-        actor_value = self.model.actor(state)
+        actor_value = self._model.actor(state)
 
         mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])

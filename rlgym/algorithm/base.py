@@ -4,7 +4,7 @@ import torch
 class Base:
 
     def __init__(self):
-        self.model = None
+        self._model = None
 
     def act(self):
         pass
@@ -13,7 +13,7 @@ class Base:
         pass
 
     def save_model(self, path):
-        torch.save(self.model.state_dict(), path)
+        torch.save(self._model.state_dict(), path)
 
     def load_model(self, path):
-        self.model.load_state_dict(torch.load(path))
+        self._model.load_state_dict(torch.load(path))

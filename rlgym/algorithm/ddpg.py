@@ -10,8 +10,6 @@ class DDPG(Base):
     def __init__(self):
         super(DDPG, self).__init__()
 
-        self.model = None
-
     def act(self):
         pass
 

@@ -5,13 +5,12 @@ from rlgym.algorithm.base import Base
 from rlgym.neuralnet import LinearNet_Discrete, LinearNet_Continuous
 
 
-class REINFORCE:
+class REINFORCE(Base):
 
     def __init__(self):
         super(REINFORCE, self).__init__()
 
-        self.model = None
-        self.gamma = 0.99
+        self.__gamma = 0.99
 
     def _discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(rewards.size()).to(
@@ -19,7 +18,7 @@ class REINFORCE:
         Gt = 0
 
         for i in range(rewards.size(0) - 1, -1, -1):
-            Gt = rewards[i] * self.gamma + Gt
+            Gt = rewards[i] * self.__gamma + Gt
             discounted_rewards[i] = Gt
 
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()
@@ -35,9 +34,9 @@ class REINFORCE:
 
         loss = (-log_probs * discounted_rewards).mean()
 
-        self.model.optimizer.zero_grad()
+        self._model.optimizer.zero_grad()
         loss.backward()
-        self.model.optimizer.step()
+        self._model.optimizer.step()
 
 
 class REINFORCE_Discrete(REINFORCE):
@@ -48,12 +47,13 @@ class REINFORCE_Discrete(REINFORCE):
 
         num_actions = action_space.n
 
-        self.model = LinearNet_Discrete(num_inputs, num_actions, learning_rate,
-                                        hidden_size, number_of_layers)
-        self.model.cuda()
+        self._model = LinearNet_Discrete(num_inputs, num_actions,
+                                          learning_rate, hidden_size,
+                                          number_of_layers)
+        self._model.cuda()
 
     def act(self, state):
-        actor_value = self.model(state)
+        actor_value = self._model(state)
 
         probs = softmax(actor_value, dim=0)
         dist = Categorical(probs)
@@ -72,13 +72,13 @@ class REINFORCE_Continuous(REINFORCE):
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self.model = LinearNet_Continuous(num_inputs, action_space,
-                                          learning_rate, hidden_size,
-                                          number_of_layers)
-        self.model.cuda()
+        self._model = LinearNet_Continuous(num_inputs, action_space,
+                                            learning_rate, hidden_size,
+                                            number_of_layers)
+        self._model.cuda()
 
     def act(self, state):
-        actor_value = self.model(state)
+        actor_value = self._model(state)
 
         mu = torch.tanh(actor_value[0]) * self.bound_interval
         sigma = torch.sigmoid(actor_value[1])
