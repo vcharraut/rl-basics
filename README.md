@@ -6,17 +6,15 @@ The goal of this repo is to implement any RL algorithms and try to benchmarks th
 Made in **Python** with the framework **PyTorch**.
 
 **Policy based:**
-
-- [X] REINFORCE [[1]](#references)
-- [X] A2C [[2]](#references)
-- [X] PPO [[3]](#references)
-- [] DDPG [[4]](#references)
-- [] TD3 [[5]](#references)
-- [] SAC [[6]](#references)
+- [x] REINFORCE [[1]](#references)
+- [x] A2C [[2]](#references)
+- [x] PPO [[3]](#references)
+- [ ] DDPG [[4]](#references)
+- [ ] TD3 [[5]](#references)
+- [ ] SAC [[6]](#references)
 
 **Value based:**
-
-- [] DQN [[7]](#references)
+- [ ] DQN [[7]](#references)
 
 ---
 
