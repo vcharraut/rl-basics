@@ -1,5 +1,7 @@
 # RL-Gym
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 # STATUS : WORK IN PROGRESS
 
 The goal of this repo is to implement any RL algorithms and try to benchmarks them with the Gym framework made by OpenAI.  
