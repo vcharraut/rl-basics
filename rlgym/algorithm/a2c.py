@@ -1,6 +1,7 @@
 import torch
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
+from rlgym.utils.normalization import normalize
 from rlgym.algorithm.base import Base
 from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
 
@@ -10,7 +11,7 @@ class A2C(Base):
     def __init__(self):
         super(A2C, self).__init__()
 
-        self.__gamma = 0.9
+        self.__gamma = 0.99
 
     def _discounted_rewards(self, rewards):
         discounted_rewards = torch.zeros(rewards.size()).to(
@@ -21,8 +22,7 @@ class A2C(Base):
             Gt = rewards[i] * self.__gamma + Gt
             discounted_rewards[i] = Gt
 
-        discounted_rewards = (discounted_rewards - discounted_rewards.mean()
-                              ) / (discounted_rewards.std() + 1e-7)
+        discounted_rewards = normalize(discounted_rewards)
 
         return discounted_rewards
 
@@ -50,15 +50,14 @@ class A2C(Base):
 
 class A2C_Discrete(A2C):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer, is_shared_network):
         super(A2C_Discrete, self).__init__()
 
-        num_actions = action_space.n
+        num_actionss = action_space.n
 
-        self._model = ActorCriticNet_Discrete(num_inputs, num_actions,
-                                             learning_rate, hidden_size,
-                                             number_of_layers, is_shared_network)
+        self._model = ActorCriticNet_Discrete(num_inputs, num_actionss,
+                                              learning_rate, list_layer,
+                                              is_shared_network)
         self._model.cuda()
 
     def act(self, state):
@@ -75,15 +74,14 @@ class A2C_Discrete(A2C):
 
 class A2C_Continuous(A2C):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer, is_shared_network):
         super(A2C_Continuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
         self._model = ActorCriticNet_Continuous(num_inputs, action_space,
-                                               learning_rate, hidden_size,
-                                               number_of_layers, is_shared_network)
+                                                learning_rate, list_layer,
+                                                is_shared_network)
         self._model.cuda()
 
     def act(self, state):

@@ -14,17 +14,20 @@ class Parallel(nn.Module):
 
 class LinearNet_Discrete(nn.Module):
 
-    def __init__(self, num_inputs, num_actions, learning_rate, hidden_size,
-                 number_of_layers):
+    def __init__(self, num_inputs, num_actions, learning_rate, list_layer):
         super(LinearNet_Discrete, self).__init__()
 
-        self.num_actions = num_actions
+        self.num_actionss = num_actions
 
-        self.nn = nn.Sequential(
-            nn.Linear(num_inputs, hidden_size), *[
-                nn.Linear(hidden_size, hidden_size)
-                for _ in range(number_of_layers - 1)
-            ], nn.Linear(hidden_size, num_actions))
+        self.nn = nn.Sequential()
+
+        current_layer_value = num_inputs
+
+        for layer_value in list_layer:
+            self.nn.append(nn.Linear(current_layer_value, layer_value))
+            current_layer_value = layer_value
+
+        self.nn.append(nn.Linear(list_layer[-1], num_actions))
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
@@ -34,20 +37,23 @@ class LinearNet_Discrete(nn.Module):
 
 class LinearNet_Continuous(nn.Module):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer):
         super(LinearNet_Continuous, self).__init__()
 
-        num_action = action_space.shape[0]
+        num_actions = action_space.shape[0]
 
-        mean_sigma_layer = Parallel(nn.Linear(hidden_size, num_action),
-                                    nn.Linear(hidden_size, num_action))
+        mean_sigma_layer = Parallel(nn.Linear(list_layer[-1], num_actions),
+                                    nn.Linear(list_layer[-1], num_actions))
 
-        self.nn = nn.Sequential(
-            nn.Linear(num_inputs, hidden_size), *[
-                nn.Linear(hidden_size, hidden_size)
-                for _ in range(number_of_layers - 1)
-            ], mean_sigma_layer)
+        self.nn = nn.Sequential()
+
+        current_layer_value = num_inputs
+
+        for layer_value in list_layer:
+            self.nn.append(nn.Linear(current_layer_value, layer_value))
+            current_layer_value = layer_value
+
+        self.nn.append(mean_sigma_layer)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
@@ -57,39 +63,43 @@ class LinearNet_Continuous(nn.Module):
 
 class ActorCriticNet_Discrete(nn.Module):
 
-    def __init__(self, num_inputs, num_actions, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, num_actions, learning_rate, list_layer,
+                 is_shared_network):
         super(ActorCriticNet_Discrete, self).__init__()
 
         self.actor_nn = None
         self.critic_nn = None
         self.optimizer = None
 
+        current_layer_value = num_inputs
+
         if is_shared_network:
-            base_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ])
+            base_nn = nn.Sequential()
 
-            self.actor_nn = nn.Sequential(base_nn,
-                                          nn.Linear(hidden_size, num_actions))
+            for layer_value in list_layer:
+                base_nn.append(nn.Linear(current_layer_value, layer_value))
+                current_layer_value = layer_value
 
-            self.critic_nn = nn.Sequential(base_nn, nn.Linear(hidden_size, 1))
+            self.actor_nn = nn.Sequential(
+                base_nn, nn.Linear(list_layer[-1], num_actions))
+
+            self.critic_nn = nn.Sequential(base_nn,
+                                           nn.Linear(list_layer[-1], 1))
 
             self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         else:
-            self.actor_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ], nn.Linear(hidden_size, num_actions))
+            self.actor_nn = nn.Sequential()
+            self.critic_nn = nn.Sequential()
 
-            self.critic_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ], nn.Linear(hidden_size, 1))
+            for layer_value in list_layer:
+                self.actor_nn.append(
+                    nn.Linear(current_layer_value, layer_value))
+                self.critic_nn.append(
+                    nn.Linear(current_layer_value, layer_value))
+                current_layer_value = layer_value
+
+            self.actor_nn.append(nn.Linear(list_layer[-1], num_actions))
+            self.critic_nn.append(nn.Linear(list_layer[-1], 1))
 
             self.optimizer = optim.Adam([{
                 'params': self.actor_nn.parameters(),
@@ -108,44 +118,46 @@ class ActorCriticNet_Discrete(nn.Module):
 
 class ActorCriticNet_Continuous(nn.Module):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
+                 is_shared_network):
         super(ActorCriticNet_Continuous, self).__init__()
 
         self.actor_nn = None
         self.critic_nn = None
         self.optimizer = None
 
-        num_action = action_space.shape[0]
+        num_actionss = action_space.shape[0]
+        current_layer_value = num_inputs
 
-        mean_sigma_layer = Parallel(nn.Linear(hidden_size, num_action),
-                                    nn.Linear(hidden_size, num_action))
+        mean_sigma_layer = Parallel(nn.Linear(list_layer[-1], num_actionss),
+                                    nn.Linear(list_layer[-1], num_actionss))
 
         if is_shared_network:
-            base_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ])
+            base_nn = nn.Sequential()
+
+            for layer_value in list_layer:
+                base_nn.append(nn.Linear(current_layer_value, layer_value))
+                current_layer_value = layer_value
 
             self.actor_nn = nn.Sequential(base_nn, mean_sigma_layer)
 
-            self.critic_nn = nn.Sequential(base_nn, nn.Linear(hidden_size, 1))
+            self.critic_nn = nn.Sequential(base_nn,
+                                           nn.Linear(list_layer[-1], 1))
 
             self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         else:
-            self.actor_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ], mean_sigma_layer)
+            self.actor_nn = nn.Sequential()
+            self.critic_nn = nn.Sequential()
 
-            self.critic_nn = nn.Sequential(
-                nn.Linear(num_inputs, hidden_size), *[
-                    nn.Linear(hidden_size, hidden_size)
-                    for _ in range(number_of_layers - 1)
-                ], nn.Linear(hidden_size, 1))
+            for layer_value in list_layer:
+                self.actor_nn.append(
+                    nn.Linear(current_layer_value, layer_value))
+                self.critic_nn.append(
+                    nn.Linear(current_layer_value, layer_value))
+                current_layer_value = layer_value
 
+            self.actor_nn.append(mean_sigma_layer)
+            self.critic_nn.append(nn.Linear(list_layer[-1], 1))
             self.optimizer = optim.Adam([{
                 'params': self.actor_nn.parameters(),
                 'lr': learning_rate

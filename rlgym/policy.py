@@ -7,8 +7,7 @@ from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
 class Policy:
 
     def __init__(self, algorithm, obversation_space, action_space,
-                 learning_rate, hidden_size, number_of_layers,
-                 is_shared_network):
+                 learning_rate, list_layer, is_shared_network):
         """Interface class between any Gym environment and any type of algortihms implemented.
 
         Args:
@@ -16,15 +15,14 @@ class Policy:
             obversation_space (int): dimension of the observation.
             action_space (gym.spaces.box.Box): box object of the action space.
             learning_rate (float): learning rate to use during learning.
-            hidden_size (int): size of the hidden layers of the model.
-            number_of_layers (int): number of hidden layers of the model.
+            list_layer (list):
             is_shared_network (bool): boolean to chose between shared or seperated network.
         """
 
         algorithm = algorithm.lower()
         args = [
-            obversation_space, action_space, learning_rate, hidden_size,
-            number_of_layers, is_shared_network
+            obversation_space, action_space, learning_rate, list_layer,
+            is_shared_network
         ]
 
         action_space_type = type(action_space).__name__.lower()

@@ -1,6 +1,7 @@
 import torch
-from torch.nn.functional import softmax
+from torch.nn.functional import softmax, normalize
 from torch.distributions import Categorical, Normal
+from rlgym.utils.normalization import normalize
 from rlgym.algorithm.base import Base
 from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
 
@@ -21,8 +22,6 @@ class PPO(Base):
         pass
 
     def _gae(self, state, next_state, reward, flags):
-        reward = (reward - reward.mean()) / (reward.std() + 1e-9)
-
         with torch.no_grad():
             value_next_state = self._model.critic(next_state).squeeze()
             value_state = self._model.critic(state).squeeze()
@@ -36,6 +35,9 @@ class PPO(Base):
         for i in range(delta.size(0) - 1, -1, -1):
             adv = self.__gamma * self.__lmbda * adv + delta[i]
             advantages[i] = adv
+
+        td_target = normalize(td_target)
+        advantages = normalize(advantages)
 
         return td_target, advantages
 
@@ -75,15 +77,14 @@ class PPO(Base):
 
 class PPO_Discrete(PPO):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
+                 is_shared_network):
         super(PPO_Discrete, self).__init__()
 
-        num_actions = action_space.n
+        num_actionss = action_space.n
 
-        self._model = ActorCriticNet_Discrete(num_inputs, num_actions,
-                                              learning_rate, hidden_size,
-                                              number_of_layers,
+        self._model = ActorCriticNet_Discrete(num_inputs, num_actionss,
+                                              learning_rate, list_layer,
                                               is_shared_network)
 
         self._model.cuda()
@@ -115,15 +116,14 @@ class PPO_Discrete(PPO):
 
 class PPO_Continuous(PPO):
 
-    def __init__(self, num_inputs, action_space, learning_rate, hidden_size,
-                 number_of_layers, is_shared_network):
+    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
+                 is_shared_network):
         super(PPO_Continuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
         self._model = ActorCriticNet_Continuous(num_inputs, action_space,
-                                                learning_rate, hidden_size,
-                                                number_of_layers,
+                                                learning_rate, list_layer,
                                                 is_shared_network)
         self._model.cuda()
 
