@@ -2,7 +2,7 @@ import torch
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
 from rlgym.algorithm.base import Base
-from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
+from rlgym.neuralnet import ActorCriticNetContinuous, ActorCriticNetDiscrete
 
 
 class DDPG(Base):

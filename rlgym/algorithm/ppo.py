@@ -1,9 +1,8 @@
 import torch
-from torch.nn.functional import softmax, normalize
+from torch.nn.functional import softmax
 from torch.distributions import Categorical, Normal
-from rlgym.utils.normalization import normalize
 from rlgym.algorithm.base import Base
-from rlgym.neuralnet import ActorCriticNet_Continuous, ActorCriticNet_Discrete
+from rlgym.neuralnet import ActorCriticNet
 
 
 class PPO(Base):
@@ -20,26 +19,6 @@ class PPO(Base):
 
     def _evaluate(self, states, actions):
         pass
-
-    def _gae(self, state, next_state, reward, flags):
-        with torch.no_grad():
-            value_next_state = self._model.critic(next_state).squeeze()
-            value_state = self._model.critic(state).squeeze()
-
-        td_target = reward + self.__gamma * value_next_state * (1. - flags)
-        delta = td_target - value_state
-
-        advantages = torch.zeros(reward.size()).to(torch.device("cuda"))
-        adv = 0
-
-        for i in range(delta.size(0) - 1, -1, -1):
-            adv = self.__gamma * self.__lmbda * adv + delta[i]
-            advantages[i] = adv
-
-        td_target = normalize(td_target)
-        advantages = normalize(advantages)
-
-        return td_target, advantages
 
     def update_policy(self, minibatch):
         states = minibatch["states"]
@@ -75,17 +54,20 @@ class PPO(Base):
             self._model.optimizer.step()
 
 
-class PPO_Discrete(PPO):
+class PPODiscrete(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
-        super(PPO_Discrete, self).__init__()
+        super(PPODiscrete, self).__init__()
 
         num_actionss = action_space.n
 
-        self._model = ActorCriticNet_Discrete(num_inputs, num_actionss,
-                                              learning_rate, list_layer,
-                                              is_shared_network)
+        self._model = ActorCriticNet(num_inputs,
+                                     num_actionss,
+                                     learning_rate,
+                                     list_layer,
+                                     is_shared_network,
+                                     is_continuous=False)
 
         self._model.cuda()
 
@@ -114,26 +96,29 @@ class PPO_Discrete(PPO):
         return action.item(), logprob
 
 
-class PPO_Continuous(PPO):
+class PPOContinuous(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
-        super(PPO_Continuous, self).__init__()
+        super(PPOContinuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = ActorCriticNet_Continuous(num_inputs, action_space,
-                                                learning_rate, list_layer,
-                                                is_shared_network)
+        self._model = ActorCriticNet(num_inputs,
+                                     action_space,
+                                     learning_rate,
+                                     list_layer,
+                                     is_shared_network,
+                                     is_continuous=True)
         self._model.cuda()
 
     def _evaluate(self, states, actions):
         action_values = self._model.actor(states)
         state_values = self._model.critic(states).squeeze()
 
-        mu = torch.tanh(action_values[0])
-        sigma = torch.sigmoid(action_values[1])
-        dist = Normal(mu, sigma)
+        mean = torch.tanh(action_values[0])
+        variance = torch.sigmoid(action_values[1])
+        dist = Normal(mean, variance)
 
         log_prob = dist.log_prob(actions).sum(dim=1)
         dist_entropy = dist.entropy().sum(dim=1)
@@ -144,9 +129,9 @@ class PPO_Continuous(PPO):
         with torch.no_grad():
             actor_value = self._model.actor(state)
 
-        mu = torch.tanh(actor_value[0]) * self.bound_interval
-        sigma = torch.sigmoid(actor_value[1])
-        dist = Normal(mu, sigma)
+        mean = torch.tanh(actor_value[0]) * self.bound_interval
+        variance = torch.sigmoid(actor_value[1])
+        dist = Normal(mean, variance)
 
         action = dist.sample()
         log_prob = dist.log_prob(action).sum()

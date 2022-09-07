@@ -1,11 +1,10 @@
+import argparse
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 from rlgym.policy import Policy
-
-import argparse
 
 plt.style.use("bmh")
 
@@ -39,7 +38,6 @@ def main():
     env = gym.make(args.env, new_step_api=True)
     n_episode = 1500
     log_every_n = n_episode / 100
-    x = np.arange(0, n_episode, log_every_n)
 
     obversation_space = env.observation_space.shape[0]
     action_space = env.action_space

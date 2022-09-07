@@ -1,7 +1,7 @@
 import torch
-from rlgym.algorithm.reinforce import REINFORCE_Continuous, REINFORCE_Discrete
-from rlgym.algorithm.ppo import PPO_Continuous, PPO_Discrete
-from rlgym.algorithm.a2c import A2C_Discrete, A2C_Continuous
+from rlgym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
+from rlgym.algorithm.ppo import PPOContinuous, PPODiscrete
+from rlgym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
 
 class Policy:
@@ -29,19 +29,19 @@ class Policy:
         self.is_continuous = True if action_space_type == "box" else False
 
         if algorithm == "reinforce":
-            self.policy = REINFORCE_Continuous(
-                *args) if self.is_continuous else REINFORCE_Discrete(*args)
+            self.policy = REINFORCEContinuous(
+                *args) if self.is_continuous else REINFORCEDiscrete(*args)
 
         elif algorithm == "a2c":
-            self.policy = A2C_Continuous(
-                *args) if self.is_continuous else A2C_Discrete(*args)
+            self.policy = A2CContinuous(
+                *args) if self.is_continuous else A2CDiscrete(*args)
 
         elif algorithm == "a3c":
             print("Not implemented")
 
         elif algorithm == "ppo":
-            self.policy = PPO_Continuous(
-                *args) if self.is_continuous else PPO_Discrete(*args)
+            self.policy = PPOContinuous(
+                *args) if self.is_continuous else PPODiscrete(*args)
 
         elif algorithm == "dqn":
             print("Not implemented")
