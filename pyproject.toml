@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "rl-gym"
+version = "0.1.0"
+description = "Deep Renforcement Learning project made with Pytorch and Gym."
+authors = ["Valentin Canete <valentin.canete@gmail.com>"]
+license = "GNU General Public License v3.0"
+readme = "README.md"
+packages = [{include = "rl_gym"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+gym = "^0.26.0"
+torch = "^1.12.1"
+matplotlib = "^3.5.3"
+ipykernel = "^6.15.2"
+tqdm = "^4.64.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
