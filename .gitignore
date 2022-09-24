@@ -4,3 +4,5 @@ __pycache__
 venv/
 debug.ipynb
 run_*
+render.py
+poetry.lock
