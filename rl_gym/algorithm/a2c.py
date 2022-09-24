@@ -1,13 +1,19 @@
 import torch
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
-from rlgym.algorithm.base import Base
-from rlgym.neuralnet import ActorCriticNet
+from rl_gym.algorithm.base import Base
+from rl_gym.neuralnet import ActorCriticNet
 
 
 class A2C(Base):
 
     def update_policy(self, minibatch):
+        """_summary_
+
+        Args:
+            minibatch (_type_): _description_
+        """
+
         states = minibatch["states"]
         rewards = minibatch["rewards"]
         log_probs = minibatch["logprobs"]
@@ -33,6 +39,16 @@ class A2CDiscrete(A2C):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_shared_network (bool): _description_
+        """
+
         super(A2CDiscrete, self).__init__()
 
         num_actionss = action_space.n
@@ -46,6 +62,15 @@ class A2CDiscrete(A2C):
         self._model.cuda()
 
     def act(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         actor_value = self._model.actor(state)
 
         probs = softmax(actor_value, dim=0)
@@ -61,6 +86,16 @@ class A2CContinuous(A2C):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_shared_network (bool): _description_
+        """
+
         super(A2CContinuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
@@ -74,6 +109,15 @@ class A2CContinuous(A2C):
         self._model.cuda()
 
     def act(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         actor_value = self._model.actor(state)
 
         mean = torch.tanh(actor_value[0]) * self.bound_interval

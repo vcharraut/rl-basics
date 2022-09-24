@@ -1,18 +1,18 @@
 import torch
 from torch.nn.functional import softmax
 from torch.distributions import Categorical, Normal
-from rlgym.algorithm.base import Base
-from rlgym.neuralnet import ActorCriticNet
+from rl_gym.algorithm.base import Base
+from rl_gym.neuralnet import ActorCriticNet
 
 
 class PPO(Base):
 
     def __init__(self):
+        """_summary_
+        """
         super(PPO, self).__init__()
 
         self.__n_optim = 3
-        self.__gamma = 0.99
-        self.__lmbda = 0.95
         self.__eps_clip = 0.2
         self.__value_constant = 0.5
         self.__entropy_constant = 0.01
@@ -21,6 +21,12 @@ class PPO(Base):
         pass
 
     def update_policy(self, minibatch):
+        """_summary_
+
+        Args:
+            minibatch (_type_): _description_
+        """
+
         states = minibatch["states"]
         actions = minibatch["actions"]
         next_states = minibatch["next_states"]
@@ -58,6 +64,16 @@ class PPODiscrete(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_shared_network (bool): _description_
+        """
+
         super(PPODiscrete, self).__init__()
 
         num_actionss = action_space.n
@@ -72,6 +88,16 @@ class PPODiscrete(PPO):
         self._model.cuda()
 
     def _evaluate(self, states, actions):
+        """_summary_
+
+        Args:
+            states (_type_): _description_
+            actions (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         action_values = self._model.actor(states)
         state_values = self._model.critic(states).squeeze()
 
@@ -84,6 +110,15 @@ class PPODiscrete(PPO):
         return log_prob, dist_entropy, state_values
 
     def act(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         with torch.no_grad():
             actor_value = self._model.actor(state)
 
@@ -100,6 +135,16 @@ class PPOContinuous(PPO):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_shared_network (bool): _description_
+        """
+
         super(PPOContinuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
@@ -113,6 +158,16 @@ class PPOContinuous(PPO):
         self._model.cuda()
 
     def _evaluate(self, states, actions):
+        """_summary_
+
+        Args:
+            states (_type_): _description_
+            actions (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         action_values = self._model.actor(states)
         state_values = self._model.critic(states).squeeze()
 
@@ -126,6 +181,15 @@ class PPOContinuous(PPO):
         return log_prob, dist_entropy, state_values
 
     def act(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         with torch.no_grad():
             actor_value = self._model.actor(state)
 

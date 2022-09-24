@@ -1,22 +1,24 @@
 import torch
-from rlgym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
-from rlgym.algorithm.ppo import PPOContinuous, PPODiscrete
-from rlgym.algorithm.a2c import A2CDiscrete, A2CContinuous
+from rl_gym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
+from rl_gym.algorithm.ppo import PPOContinuous, PPODiscrete
+from rl_gym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
 
 class Policy:
 
     def __init__(self, algorithm, obversation_space, action_space,
                  learning_rate, list_layer, is_shared_network):
-        """Interface class between any Gym environment and any type of algortihms implemented.
+        """Interface class between any Gym environment and any type of
+           algortihms implemented.
 
         Args:
             algorithm (str): algorithm for the learning method.
             obversation_space (int): dimension of the observation.
             action_space (gym.spaces.box.Box): box object of the action space.
             learning_rate (float): learning rate to use during learning.
-            list_layer (list):
-            is_shared_network (bool): boolean to chose between shared or seperated network.
+            list_layer (list): list of layers' size.
+            is_shared_network (bool): boolean to chose between shared or
+                                      seperated network.
         """
 
         algorithm = algorithm.lower()

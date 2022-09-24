@@ -5,10 +5,26 @@ import torch.optim as optim
 class Parallel(nn.Module):
 
     def __init__(self, mean_layer, sigma_layer):
+        """_summary_
+
+        Args:
+            mean_layer (_type_): _description_
+            sigma_layer (_type_): _description_
+        """
+
         super().__init__()
         self.list_module = nn.ModuleList([mean_layer, sigma_layer])
 
     def forward(self, inputs):
+        """_summary_
+
+        Args:
+            inputs (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         return [module(inputs) for module in self.list_module]
 
 
@@ -16,6 +32,16 @@ class LinearNet(nn.Module):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_continuous):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_continuous (bool): _description_
+        """
+
         super(LinearNet, self).__init__()
 
         num_actions = action_space.shape[0]
@@ -39,6 +65,15 @@ class LinearNet(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
     def forward(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         return self.neural_net(state)
 
 
@@ -46,6 +81,17 @@ class ActorCriticNet(nn.Module):
 
     def __init__(self, num_inputs, action_space, learning_rate, list_layer,
                  is_shared_network, is_continuous):
+        """_summary_
+
+        Args:
+            num_inputs (_type_): _description_
+            action_space (_type_): _description_
+            learning_rate (_type_): _description_
+            list_layer (_type_): _description_
+            is_shared_network (bool): _description_
+            is_continuous (bool): _description_
+        """
+
         super(ActorCriticNet, self).__init__()
 
         self.actor_neural_net = None
@@ -104,7 +150,25 @@ class ActorCriticNet(nn.Module):
         raise NotImplementedError(self.__class__.__name__)
 
     def actor(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         return self.actor_neural_net(state)
 
     def critic(self, state):
+        """_summary_
+
+        Args:
+            state (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
         return self.critic_neural_net(state)
