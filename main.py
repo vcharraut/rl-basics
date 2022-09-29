@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
-from rl_gym.policy import Policy
+from rlgym.policy import Policy
 
 plt.style.use("bmh")
 

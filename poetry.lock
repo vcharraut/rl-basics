@@ -107,11 +107,14 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "executing"
-version = "1.0.0"
+version = "1.1.0"
 description = "Get the currently executing AST node of a frame, and other information"
 category = "main"
 optional = false
 python-versions = "*"
+
+[package.extras]
+tests = ["rich", "littleutils", "pytest", "asttokens"]
 
 [[package]]
 name = "fonttools"
@@ -170,7 +173,7 @@ python-versions = "*"
 
 [[package]]
 name = "ipykernel"
-version = "6.15.3"
+version = "6.16.0"
 description = "IPython Kernel for Jupyter"
 category = "main"
 optional = false
@@ -550,7 +553,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
 
 [[package]]
 name = "stack-data"
-version = "0.5.0"
+version = "0.5.1"
 description = "Extract data from python stack frames and tracebacks for informative displays"
 category = "main"
 optional = false

@@ -1,8 +1,8 @@
 import torch
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
-from rl_gym.algorithm.base import Base
-from rl_gym.neuralnet import ActorCriticNet
+from rlgym.algorithm.base import Base
+from rlgym.neuralnet import ActorCriticNet
 
 
 class A2C(Base):

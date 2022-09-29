@@ -5,7 +5,7 @@ description = "Deep Renforcement Learning project made with Pytorch and Gym."
 authors = ["Valentin Canete <valentin.canete@gmail.com>"]
 license = "GNU General Public License v3.0"
 readme = "README.md"
-packages = [{include = "rl_gym"}]
+packages = [{include = "rlgym"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"

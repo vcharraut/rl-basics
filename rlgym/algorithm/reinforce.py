@@ -1,8 +1,8 @@
 import torch
 from torch.distributions import Categorical, Normal
 from torch.nn.functional import softmax
-from rl_gym.algorithm.base import Base
-from rl_gym.neuralnet import LinearNet
+from rlgym.algorithm.base import Base
+from rlgym.neuralnet import LinearNet
 
 
 class REINFORCE(Base):

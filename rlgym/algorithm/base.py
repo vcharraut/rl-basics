@@ -1,5 +1,5 @@
 import torch
-from rl_gym.utils.normalization import normalize
+from rlgym.utils.normalization import normalize
 
 
 class Base:
