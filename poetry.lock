@@ -21,6 +21,18 @@ six = "*"
 test = ["astroid (<=2.5.3)", "pytest"]
 
 [[package]]
+name = "autopep8"
+version = "1.7.0"
+description = "A tool that automatically formats Python code to conform to the PEP 8 style guide"
+category = "dev"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+pycodestyle = ">=2.9.1"
+toml = "*"
+
+[[package]]
 name = "backcall"
 version = "0.2.0"
 description = "Specifications for callback functions passed in to an API"
@@ -107,7 +119,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "executing"
-version = "1.1.0"
+version = "1.1.1"
 description = "Get the currently executing AST node of a frame, and other information"
 category = "main"
 optional = false
@@ -118,7 +130,7 @@ tests = ["rich", "littleutils", "pytest", "asttokens"]
 
 [[package]]
 name = "fonttools"
-version = "4.37.3"
+version = "4.37.4"
 description = "Tools to manipulate font files"
 category = "main"
 optional = false
@@ -140,7 +152,7 @@ woff = ["zopfli (>=0.1.4)", "brotlicffi (>=0.8.0)", "brotli (>=1.0.1)"]
 
 [[package]]
 name = "gym"
-version = "0.26.1"
+version = "0.26.2"
 description = "Gym: A universal API for reinforcement learning environments"
 category = "main"
 optional = false
@@ -153,14 +165,14 @@ numpy = ">=1.18.0"
 
 [package.extras]
 accept-rom-license = ["autorom[accept-rom-license] (>=0.4.2,<0.5.0)"]
-all = ["moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "box2d-py (==2.3.5)", "swig (>=4.0.0,<5.0.0)", "ale-py (>=0.8.0,<0.9.0)", "mujoco (==2.2.0)", "mujoco_py (>=2.1,<2.2)", "imageio (>=2.14.1)", "opencv-python (>=3.0)", "pytest (==7.0.1)", "matplotlib (>=3.0)", "pygame (==2.1.0)"]
+all = ["pygame (==2.1.0)", "box2d-py (==2.3.5)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)", "swig (>=4.0.0,<5.0.0)", "lz4 (>=3.1.0)", "pytest (==7.0.1)", "mujoco_py (>=2.1,<2.2)", "mujoco (==2.2)", "ale-py (>=0.8.0,<0.9.0)", "imageio (>=2.14.1)"]
 atari = ["ale-py (>=0.8.0,<0.9.0)"]
 box2d = ["box2d-py (==2.3.5)", "pygame (==2.1.0)", "swig (>=4.0.0,<5.0.0)"]
 classic_control = ["pygame (==2.1.0)"]
-mujoco = ["mujoco (==2.2.0)", "imageio (>=2.14.1)"]
+mujoco = ["mujoco (==2.2)", "imageio (>=2.14.1)"]
 mujoco_py = ["mujoco_py (>=2.1,<2.2)"]
 other = ["lz4 (>=3.1.0)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)"]
-testing = ["moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "box2d-py (==2.3.5)", "swig (>=4.0.0,<5.0.0)", "mujoco (==2.2.0)", "mujoco_py (>=2.1,<2.2)", "imageio (>=2.14.1)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "pygame (==2.1.0)", "pytest (==7.0.1)"]
+testing = ["pygame (==2.1.0)", "box2d-py (==2.3.5)", "swig (>=4.0.0,<5.0.0)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "mujoco_py (>=2.1,<2.2)", "mujoco (==2.2)", "imageio (>=2.14.1)", "pytest (==7.0.1)"]
 toy_text = ["pygame (==2.1.0)"]
 
 [[package]]
@@ -317,7 +329,7 @@ python-versions = ">=3.7"
 
 [[package]]
 name = "matplotlib"
-version = "3.6.0"
+version = "3.6.1"
 description = "Python plotting package"
 category = "main"
 optional = false
@@ -348,7 +360,7 @@ traitlets = "*"
 
 [[package]]
 name = "nest-asyncio"
-version = "1.5.5"
+version = "1.5.6"
 description = "Patch asyncio to allow nested event loops"
 category = "main"
 optional = false
@@ -466,6 +478,14 @@ optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
+name = "pycodestyle"
+version = "2.9.1"
+description = "Python style guide checker"
+category = "dev"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
 name = "pycparser"
 version = "2.21"
 description = "C parser in Python"
@@ -568,6 +588,14 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "typeguard", "pytest"]
 
 [[package]]
+name = "toml"
+version = "0.10.2"
+description = "Python Library for Tom's Obvious, Minimal Language"
+category = "dev"
+optional = false
+python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
+
+[[package]]
 name = "tomli"
 version = "2.0.1"
 description = "A lil' TOML parser"
@@ -624,7 +652,7 @@ test = ["pre-commit", "pytest"]
 
 [[package]]
 name = "typing-extensions"
-version = "4.3.0"
+version = "4.4.0"
 description = "Backported and Experimental Type Hints for Python 3.7+"
 category = "main"
 optional = false
@@ -646,14 +674,23 @@ category = "main"
 optional = false
 python-versions = ">=3.7"
 
+[[package]]
+name = "yapf"
+version = "0.32.0"
+description = "A formatter for Python code."
+category = "dev"
+optional = false
+python-versions = "*"
+
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "a2c824536e661088a282cb49645a037446ac7fba7682d3e24c0bc8d39afc6fd9"
+content-hash = "f9b72be8654196b0d265050e2c2d35732a2f6d42f7495088fee26be096ba2cf6"
 
 [metadata.files]
 appnope = []
 asttokens = []
+autopep8 = []
 backcall = []
 cffi = []
 cloudpickle = []
@@ -689,6 +726,7 @@ psutil = []
 ptyprocess = []
 pure-eval = []
 py = []
+pycodestyle = []
 pycparser = []
 pygments = []
 pyparsing = []
@@ -698,6 +736,7 @@ pyzmq = []
 setuptools-scm = []
 six = []
 stack-data = []
+toml = []
 tomli = []
 torch = []
 tornado = []
@@ -706,3 +745,4 @@ traitlets = []
 typing-extensions = []
 wcwidth = []
 widgetsnbextension = []
+yapf = []

@@ -1,25 +1,54 @@
 import torch
-from rlgym.utils.normalization import normalize
+from abc import ABC, abstractmethod
 
 
-class Base:
+class Base(ABC):
+    """
+    Base class for any reinforcement learning algorithms.
+    """
 
     def __init__(self):
-        """_summary_
+        """
+        Constructs Base class.
         """
 
         self._model = None
         self.__gamma = 0.99
         self.__lmbda = 0.95
 
-    def _discounted_rewards(self, rewards):
-        """_summary_
+    @abstractmethod
+    def act(self, state):
+        pass
+
+    @abstractmethod
+    def update_policy(self, minibatch):
+        pass
+
+    def _normalize_tensor(self,
+                          tensor: torch.Tensor,
+                          eps=1e-9) -> torch.Tensor:
+        """
+        _summary_
 
         Args:
-            rewards (_type_): _description_
+            tensor: _description_
+            eps: _description_. Defaults to 1e-9.
 
         Returns:
-            _type_: _description_
+            _description_
+        """
+
+        return (tensor - tensor.mean()) / (tensor.std() + eps)
+
+    def _discounted_rewards(self, rewards: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the rewards with a discount factor.
+
+        Args:
+            rewards: rewards collected during an episode
+
+        Returns:
+            rewards with a discount factor
         """
 
         discounted_rewards = torch.zeros(rewards.size()).to(
@@ -30,62 +59,62 @@ class Base:
             gain = rewards[i] * self.__gamma + gain
             discounted_rewards[i] = gain
 
-        discounted_rewards = normalize(discounted_rewards)
+        discounted_rewards = self._normalize_tensor(discounted_rewards)
 
         return discounted_rewards
 
-    def _gae(self, state, next_state, reward, flags):
-        """_summary_
+    def _gae(self, states: torch.Tensor, next_states: torch.Tensor,
+             rewards: torch.Tensor,
+             flags: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Computes the rewards with the GAE method.
 
         Args:
-            state (_type_): _description_
-            next_state (_type_): _description_
-            reward (_type_): _description_
-            flags (_type_): _description_
+            state: states collected during an episode
+            next_state: next states collected during an episode
+            reward: collected during an episode
+            flags: flags collected during an episode
 
         Returns:
-            _type_: _description_
+            td_target: values from the value function
+            advantages: values from the advantage function
         """
 
         with torch.no_grad():
-            value_next_state = self._model.critic(next_state).squeeze()
-            value_state = self._model.critic(state).squeeze()
+            value_next_states = self._model.critic(next_states).squeeze()
+            value_states = self._model.critic(states).squeeze()
 
-        td_target = reward + self.__gamma * value_next_state * (1. - flags)
-        delta = td_target - value_state
+        td_target = rewards + self.__gamma * value_next_states * (1.0 - flags)
+        delta = td_target - value_states
 
-        advantages = torch.zeros(reward.size()).to(torch.device("cuda"))
+        advantages = torch.zeros(rewards.size()).to(torch.device("cuda"))
         adv = 0
 
         for i in range(delta.size(0) - 1, -1, -1):
             adv = self.__gamma * self.__lmbda * adv + delta[i]
             advantages[i] = adv
 
-        td_target = normalize(td_target)
-        advantages = normalize(advantages)
+        td_target = self._normalize_tensor(td_target)
+        advantages = self._normalize_tensor(advantages)
 
         return td_target, advantages
 
-    def act(self, state):
-        pass
-
-    def update_policy(self, minibatch):
-        pass
-
-    def save_model(self, path):
-        """Save the model parameter to a pt file.
+    def save_model(self, path: str):
+        """
+        Save the model parameter to a pt file.
 
         Args:
-            path (str): path for the pt file.
+            path: path for the pt file.
         """
 
         torch.save(self._model.state_dict(), path)
 
-    def load_model(self, path):
-        """Load a model parameter from a pt file.
+    def load_model(self, path: str):
+        """
+        Load a model parameter from a pt file.
 
         Args:
-            path (str): path for the pt file.
+            path: path for the pt file.
         """
 
         self._model.load_state_dict(torch.load(path))

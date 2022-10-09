@@ -1,4 +1,6 @@
 import torch
+import gym
+import numpy
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
 from rlgym.algorithm.base import Base
@@ -6,12 +8,19 @@ from rlgym.neuralnet import ActorCriticNet
 
 
 class A2C(Base):
+    """
+    _summary_
 
-    def update_policy(self, minibatch):
-        """_summary_
+    Args:
+        Base: _description_
+    """
+
+    def update_policy(self, minibatch: dict):
+        """
+        _summary_
 
         Args:
-            minibatch (_type_): _description_
+            minibatch: _description_
         """
 
         states = minibatch["states"]
@@ -36,16 +45,25 @@ class A2C(Base):
 
 
 class A2CDiscrete(A2C):
+    """
+    _summary_
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
-                 is_shared_network):
-        """_summary_
+    Args:
+        A2C: _description_
+    """
+
+    def __init__(self, num_inputs: int,
+                 action_space: gym.spaces.discrete.Discrete,
+                 learning_rate: float, list_layer: list,
+                 is_shared_network: bool):
+        """
+        _summary_
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
+            num_inputs: _description_
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
             is_shared_network (bool): _description_
         """
 
@@ -61,11 +79,12 @@ class A2CDiscrete(A2C):
                                      is_continuous=False)
         self._model.cuda()
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[int, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
             _type_: _description_
@@ -83,17 +102,25 @@ class A2CDiscrete(A2C):
 
 
 class A2CContinuous(A2C):
+    """
+    _summary_
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
-                 is_shared_network):
-        """_summary_
+    Args:
+        A2C: _description_
+    """
+
+    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
+                 learning_rate: float, list_layer: list,
+                 is_shared_network: bool):
+        """
+        _summary_
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
-            is_shared_network (bool): _description_
+            num_inputs: _description_
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
+            is_shared_network: _description_
         """
 
         super(A2CContinuous, self).__init__()
@@ -108,14 +135,15 @@ class A2CContinuous(A2C):
                                      is_continuous=True)
         self._model.cuda()
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[numpy.ndarray, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
-            _type_: _description_
+            _description_
         """
 
         actor_value = self._model.actor(state)

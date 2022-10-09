@@ -1,27 +1,34 @@
 import torch
+import gym
+import numpy
 from rlgym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
 from rlgym.algorithm.ppo import PPOContinuous, PPODiscrete
 from rlgym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
 
 class Policy:
+    """
+    _summary_
+    """
 
-    def __init__(self, algorithm, obversation_space, action_space,
-                 learning_rate, list_layer, is_shared_network):
-        """Interface class between any Gym environment and any type of
-           algortihms implemented.
+    def __init__(self, type_algorithm: str, obversation_space: int,
+                 action_space: gym.spaces.box.Box, learning_rate: float,
+                 list_layer: list, is_shared_network: bool):
+        """
+        Interface class between any Gym environment and any type of
+        algortihms implemented.
 
         Args:
-            algorithm (str): algorithm for the learning method.
-            obversation_space (int): dimension of the observation.
-            action_space (gym.spaces.box.Box): box object of the action space.
-            learning_rate (float): learning rate to use during learning.
-            list_layer (list): list of layers' size.
-            is_shared_network (bool): boolean to chose between shared or
+            type_algorithm: type of algorithm for the learning method.
+            obversation_space: dimension of the observation.
+            action_space: box object of the action space.
+            learning_rate: learning rate to use during learning.
+            list_layer: list of layers' size.
+            is_shared_network: boolean to chose between shared or
                                       seperated network.
         """
 
-        algorithm = algorithm.lower()
+        type_algorithm = type_algorithm.lower()
         args = [
             obversation_space, action_space, learning_rate, list_layer,
             is_shared_network
@@ -30,65 +37,73 @@ class Policy:
         action_space_type = type(action_space).__name__.lower()
         self.is_continuous = True if action_space_type == "box" else False
 
-        if algorithm == "reinforce":
-            self.policy = REINFORCEContinuous(
+        if type_algorithm == "reinforce":
+            self.algorithm = REINFORCEContinuous(
                 *args) if self.is_continuous else REINFORCEDiscrete(*args)
 
-        elif algorithm == "a2c":
-            self.policy = A2CContinuous(
+        elif type_algorithm == "a2c":
+            self.algorithm = A2CContinuous(
                 *args) if self.is_continuous else A2CDiscrete(*args)
 
-        elif algorithm == "a3c":
-            print("Not implemented")
+        elif type_algorithm == "a3c":
+            raise NotImplementedError()
 
-        elif algorithm == "ppo":
-            self.policy = PPOContinuous(
+        elif type_algorithm == "ppo":
+            self.algorithm = PPOContinuous(
                 *args) if self.is_continuous else PPODiscrete(*args)
 
-        elif algorithm == "dqn":
-            print("Not implemented")
+        elif type_algorithm == "dqn":
+            raise NotImplementedError()
 
-        elif algorithm == "ddpg":
-            print("Not implemented")
+        elif type_algorithm == "ddpg":
+            raise NotImplementedError()
 
-        elif algorithm == "td3":
-            print("Not implemented")
+        elif type_algorithm == "td3":
+            raise NotImplementedError()
 
-        elif algorithm == "sac":
-            print("Not implemented")
+        elif type_algorithm == "sac":
+            raise NotImplementedError()
 
-    def get_action(self, state):
-        """Get the optimal action based on the current state.
+    def get_action(self, state: numpy.ndarray) -> tuple:
+        """
+        Get the optimal action based on the current state.
 
         Args:
-            state (numpy.ndarray): current state of the environment.
+            state: current state of the environment.
 
         Returns:
-            tuple: action chosed by the model.
+            action chosed by the model.
         """
+
         state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
-        return self.policy.act(state_torch)
+        return self.algorithm.act(state_torch)
 
-    def update_policy(self, minibatch):
-        """Update the model based on the training data.
+    def update_policy(self, minibatch: dict):
+        """
+        Update the model based on the training data.
 
         Args:
-            minibatch (dict): Minibatch of data from training.
+            minibatch: Minibatch of data from training.
         """
-        self.policy.update_policy(minibatch)
 
-    def save(self, path):
-        """Save the model to disk.
+        self.algorithm.update_policy(minibatch)
+
+    def save(self, path: str):
+        """
+        Save the model to disk.
 
         Args:
-            path (str): path file to save the model.
+            path: path file to save the model.
         """
-        self.policy.save_model(path)
 
-    def load(self, path):
-        """Load a model from disk.
+        self.algorithm.save_model(path)
+
+    def load(self, path: str):
+        """
+        Load a model from disk.
 
         Args:
-            path (str): path file to load the model.
+            path: path file to load the model.
         """
-        self.policy.load_model(path)
+
+        self.algorithm.load_model(path)

@@ -1,4 +1,6 @@
 import torch
+import gym
+import numpy
 from torch.distributions import Categorical, Normal
 from torch.nn.functional import softmax
 from rlgym.algorithm.base import Base
@@ -6,12 +8,22 @@ from rlgym.neuralnet import LinearNet
 
 
 class REINFORCE(Base):
+    """
+    Base class for the implementation of the REINFORCE algorithm.
 
-    def update_policy(self, minibatch):
-        """_summary_
+    Args:
+        Base (Class): parent class
+    """
+
+    def update_policy(self, minibatch: dict):
+        """
+        Computes new gradients based from an episode and
+        update the neural network.
 
         Args:
-            minibatch (_type_): _description_
+            minibatch (dict): dict containing information from the episode,
+                keys are (states, actions, next_states,
+                rewards, flags, logprobs)
         """
 
         rewards = minibatch["rewards"]
@@ -27,37 +39,48 @@ class REINFORCE(Base):
 
 
 class REINFORCEDiscrete(REINFORCE):
+    """
+    REINFORCE implementation to use in a discrete environment.
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer, _):
-        """_summary_
+    Args:
+        REINFORCE -- parent class
+    """
+
+    def __init__(self, num_inputs: int,
+                 action_space: gym.spaces.discrete.Discrete,
+                 learning_rate: float, list_layer: list, _):
+        """
+        Constructs REINFORCEDiscrete class
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
-            _ (_type_): _description_
+            num_inputs:
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
+            _: _description_
         """
 
         super(REINFORCEDiscrete, self).__init__()
 
-        num_actionss = action_space.n
+        num_actions = action_space.n
 
         self._model = LinearNet(num_inputs,
-                                num_actionss,
+                                num_actions,
                                 learning_rate,
                                 list_layer,
                                 is_continuous=False)
         self._model.cuda()
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[int, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
-            _type_: _description_
+            int: action value
+            torch.Tensor: log prob
         """
 
         actor_value = self._model(state)
@@ -72,16 +95,24 @@ class REINFORCEDiscrete(REINFORCE):
 
 
 class REINFORCEContinuous(REINFORCE):
+    """
+    _summary_
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer, _):
-        """_summary_
+    Args:
+        REINFORCE: _description_
+    """
+
+    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
+                 learning_rate: float, list_layer: list, _):
+        """
+        _summary_
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
-            _ (_type_): _description_
+            num_inputs: _description_
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
+            _: _description_
         """
 
         super(REINFORCEContinuous, self).__init__()
@@ -95,11 +126,12 @@ class REINFORCEContinuous(REINFORCE):
                                 is_continuous=True)
         self._model.cuda()
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[numpy.ndarray, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
             _type_: _description_

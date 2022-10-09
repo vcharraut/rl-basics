@@ -1,14 +1,24 @@
 import torch
+import gym
+import numpy
 from torch.nn.functional import softmax
 from torch.distributions import Categorical, Normal
 from rlgym.algorithm.base import Base
 from rlgym.neuralnet import ActorCriticNet
+from abc import abstractmethod
 
 
 class PPO(Base):
+    """
+    _summary_
+
+    Args:
+        Base: _description_
+    """
 
     def __init__(self):
-        """_summary_
+        """
+        _summary_
         """
         super(PPO, self).__init__()
 
@@ -17,14 +27,16 @@ class PPO(Base):
         self.__value_constant = 0.5
         self.__entropy_constant = 0.01
 
+    @abstractmethod
     def _evaluate(self, states, actions):
         pass
 
-    def update_policy(self, minibatch):
-        """_summary_
+    def update_policy(self, minibatch: dict):
+        """
+        _summary_
 
         Args:
-            minibatch (_type_): _description_
+            minibatch: _description_
         """
 
         states = minibatch["states"]
@@ -61,16 +73,25 @@ class PPO(Base):
 
 
 class PPODiscrete(PPO):
+    """
+    _summary_
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
-                 is_shared_network):
-        """_summary_
+    Args:
+        PPO: _description_
+    """
+
+    def __init__(self, num_inputs: int,
+                 action_space: gym.spaces.discrete.Discrete,
+                 learning_rate: float, list_layer: list,
+                 is_shared_network: bool):
+        """
+        _summary_
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
+            num_inputs: _description_
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
             is_shared_network (bool): _description_
         """
 
@@ -87,12 +108,15 @@ class PPODiscrete(PPO):
 
         self._model.cuda()
 
-    def _evaluate(self, states, actions):
-        """_summary_
+    def _evaluate(
+        self, states: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            states (_type_): _description_
-            actions (_type_): _description_
+            states: _description_
+            actions: _description_
 
         Returns:
             _type_: _description_
@@ -109,11 +133,12 @@ class PPODiscrete(PPO):
 
         return log_prob, dist_entropy, state_values
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[int, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
             _type_: _description_
@@ -132,16 +157,24 @@ class PPODiscrete(PPO):
 
 
 class PPOContinuous(PPO):
+    """
+    _summary_
 
-    def __init__(self, num_inputs, action_space, learning_rate, list_layer,
-                 is_shared_network):
-        """_summary_
+    Args:
+        PPO: _description_
+    """
+
+    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
+                 learning_rate: float, list_layer: list,
+                 is_shared_network: bool):
+        """
+        _summary_
 
         Args:
-            num_inputs (_type_): _description_
-            action_space (_type_): _description_
-            learning_rate (_type_): _description_
-            list_layer (_type_): _description_
+            num_inputs: _description_
+            action_space: _description_
+            learning_rate: _description_
+            list_layer: _description_
             is_shared_network (bool): _description_
         """
 
@@ -157,12 +190,15 @@ class PPOContinuous(PPO):
                                      is_continuous=True)
         self._model.cuda()
 
-    def _evaluate(self, states, actions):
-        """_summary_
+    def _evaluate(
+        self, states: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            states (_type_): _description_
-            actions (_type_): _description_
+            states: _description_
+            actions: _description_
 
         Returns:
             _type_: _description_
@@ -180,11 +216,12 @@ class PPOContinuous(PPO):
 
         return log_prob, dist_entropy, state_values
 
-    def act(self, state):
-        """_summary_
+    def act(self, state: torch.Tensor) -> tuple[numpy.ndarray, torch.Tensor]:
+        """
+        _summary_
 
         Args:
-            state (_type_): _description_
+            state: _description_
 
         Returns:
             _type_: _description_
