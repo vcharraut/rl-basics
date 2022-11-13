@@ -15,11 +15,6 @@ Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
 - [ ] DDPG [[4]](#references)
 - [ ] TD3 [[5]](#references)
 - [ ] SAC [[6]](#references)
-
-**Value based:**
-
-- [ ] DQN [[7]](#references)
-
 ---
 
 ## Setup
@@ -54,4 +49,3 @@ pip install -r requirements.txt
 - [4] [Deterministic Policy Gradient Algorithms](https://proceedings.mlr.press/v32/silver14.pdf)
 - [5] [Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477)
 - [6] [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor](https://arxiv.org/abs/1801.01290)
-- [7] [Playing Atari with Deep Reinforcement Learning](https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf)
