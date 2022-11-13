@@ -11,15 +11,13 @@ from abc import abstractmethod
 class PPO(Base):
     """
     _summary_
-
-    Args:
-        Base: _description_
     """
 
     def __init__(self):
         """
         _summary_
         """
+
         super(PPO, self).__init__()
 
         self.__n_optim = 3
@@ -33,10 +31,12 @@ class PPO(Base):
 
     def update_policy(self, minibatch: dict):
         """
-        _summary_
+        Computes new gradients based from an episode and
+        update the neural network.
 
         Args:
-            minibatch: _description_
+            minibatch (dict): dict containing information from the episode,
+            keys are (states, actions, next_states, rewards, flags, log_probs)
         """
 
         states = minibatch["states"]
@@ -44,15 +44,15 @@ class PPO(Base):
         next_states = minibatch["next_states"]
         rewards = minibatch["rewards"]
         flags = minibatch["flags"]
-        old_logprobs = minibatch["logprobs"]
+        old_log_probs = minibatch["log_probs"]
 
         returns, advantages = self._gae(states, next_states, rewards, flags)
 
         for _ in range(self.__n_optim):
-            logprobs, dist_entropy, state_values = self._evaluate(
+            log_probs, dist_entropy, state_values = self._evaluate(
                 states, actions)
 
-            ratios = torch.exp(logprobs - old_logprobs)
+            ratios = torch.exp(log_probs - old_log_probs)
 
             surr1 = ratios * advantages
 
@@ -80,7 +80,7 @@ class PPODiscrete(PPO):
         PPO: _description_
     """
 
-    def __init__(self, num_inputs: int,
+    def __init__(self, obs_space: int,
                  action_space: gym.spaces.discrete.Discrete,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
@@ -88,18 +88,18 @@ class PPODiscrete(PPO):
         _summary_
 
         Args:
-            num_inputs: _description_
+            obs_space: _description_
             action_space: _description_
             learning_rate: _description_
             list_layer: _description_
-            is_shared_network (bool): _description_
+            is_shared_network: _description_
         """
 
         super(PPODiscrete, self).__init__()
 
         num_actionss = action_space.n
 
-        self._model = ActorCriticNet(num_inputs,
+        self._model = ActorCriticNet(obs_space,
                                      num_actionss,
                                      learning_rate,
                                      list_layer,
@@ -151,9 +151,9 @@ class PPODiscrete(PPO):
         dist = Categorical(probs)
 
         action = dist.sample()
-        logprob = dist.log_prob(action)
+        log_prob = dist.log_prob(action)
 
-        return action.item(), logprob
+        return action.item(), log_prob
 
 
 class PPOContinuous(PPO):
@@ -164,25 +164,25 @@ class PPOContinuous(PPO):
         PPO: _description_
     """
 
-    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
+    def __init__(self, obs_space: int, action_space: gym.spaces.box.Box,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
         _summary_
 
         Args:
-            num_inputs: _description_
+            obs_space: _description_
             action_space: _description_
             learning_rate: _description_
             list_layer: _description_
-            is_shared_network (bool): _description_
+            is_shared_network: _description_
         """
 
         super(PPOContinuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = ActorCriticNet(num_inputs,
+        self._model = ActorCriticNet(obs_space,
                                      action_space,
                                      learning_rate,
                                      list_layer,

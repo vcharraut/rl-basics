@@ -9,23 +9,22 @@ from rlgym.neuralnet import ActorCriticNet
 
 class A2C(Base):
     """
-    _summary_
-
-    Args:
-        Base: _description_
+    Advantage Actor Critic implementation.
     """
 
     def update_policy(self, minibatch: dict):
         """
-        _summary_
+        Computes new gradients based from an episode and
+        update the neural network.
 
         Args:
-            minibatch: _description_
+            minibatch (dict): dict containing information from the episode,
+            keys are (states, actions, next_states, rewards, flags, log_probs)
         """
 
         states = minibatch["states"]
         rewards = minibatch["rewards"]
-        log_probs = minibatch["logprobs"]
+        log_probs = minibatch["log_probs"]
 
         discounted_rewards = self._discounted_rewards(rewards)
 
@@ -46,32 +45,29 @@ class A2C(Base):
 
 class A2CDiscrete(A2C):
     """
-    _summary_
-
-    Args:
-        A2C: _description_
+    A2C implementation for discrete environments.
     """
 
-    def __init__(self, num_inputs: int,
+    def __init__(self, obs_space: int,
                  action_space: gym.spaces.discrete.Discrete,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
-        _summary_
+        Constructs a A2C algorithm for discrete environments.
 
         Args:
-            num_inputs: _description_
-            action_space: _description_
+            obs_space: size of the observation
+            action_space: number of actions
             learning_rate: _description_
             list_layer: _description_
-            is_shared_network (bool): _description_
+            is_shared_network: _description_
         """
 
         super(A2CDiscrete, self).__init__()
 
         num_actionss = action_space.n
 
-        self._model = ActorCriticNet(num_inputs,
+        self._model = ActorCriticNet(obs_space,
                                      num_actionss,
                                      learning_rate,
                                      list_layer,
@@ -87,7 +83,7 @@ class A2CDiscrete(A2C):
             state: _description_
 
         Returns:
-            _type_: _description_
+            _description_
         """
 
         actor_value = self._model.actor(state)
@@ -96,28 +92,25 @@ class A2CDiscrete(A2C):
         dist = Categorical(probs)
 
         action = dist.sample()
-        logprob = dist.log_prob(action)
+        log_prob = dist.log_prob(action)
 
-        return action.item(), logprob
+        return action.item(), log_prob
 
 
 class A2CContinuous(A2C):
     """
-    _summary_
-
-    Args:
-        A2C: _description_
+    A2C implementation for continuous environments.
     """
 
-    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
+    def __init__(self, obs_space: int, action_space: gym.spaces.box.Box,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
-        _summary_
+        Constructs a A2C algorithm for continuous environments.
 
         Args:
-            num_inputs: _description_
-            action_space: _description_
+            obs_space: size of the observation
+            action_space: number of actions
             learning_rate: _description_
             list_layer: _description_
             is_shared_network: _description_
@@ -127,7 +120,7 @@ class A2CContinuous(A2C):
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = ActorCriticNet(num_inputs,
+        self._model = ActorCriticNet(obs_space,
                                      action_space,
                                      learning_rate,
                                      list_layer,

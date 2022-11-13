@@ -22,12 +22,11 @@ class REINFORCE(Base):
 
         Args:
             minibatch (dict): dict containing information from the episode,
-                keys are (states, actions, next_states,
-                rewards, flags, logprobs)
+            keys are (states, actions, next_states, rewards, flags, log_probs)
         """
 
         rewards = minibatch["rewards"]
-        log_probs = minibatch["logprobs"]
+        log_probs = minibatch["log_probs"]
 
         discounted_rewards = self._discounted_rewards(rewards)
 
@@ -46,25 +45,24 @@ class REINFORCEDiscrete(REINFORCE):
         REINFORCE -- parent class
     """
 
-    def __init__(self, num_inputs: int,
+    def __init__(self, obs_space: int,
                  action_space: gym.spaces.discrete.Discrete,
-                 learning_rate: float, list_layer: list, _):
+                 learning_rate: float, list_layer: list):
         """
         Constructs REINFORCEDiscrete class
 
         Args:
-            num_inputs:
-            action_space: _description_
-            learning_rate: _description_
+            obs_space: size of the observation
+            action_space: number of actions
+            learning_rate: learning rate's value
             list_layer: _description_
-            _: _description_
         """
 
         super(REINFORCEDiscrete, self).__init__()
 
         num_actions = action_space.n
 
-        self._model = LinearNet(num_inputs,
+        self._model = LinearNet(obs_space,
                                 num_actions,
                                 learning_rate,
                                 list_layer,
@@ -79,8 +77,7 @@ class REINFORCEDiscrete(REINFORCE):
             state: _description_
 
         Returns:
-            int: action value
-            torch.Tensor: log prob
+            _description_
         """
 
         actor_value = self._model(state)
@@ -89,9 +86,9 @@ class REINFORCEDiscrete(REINFORCE):
         dist = Categorical(probs)
 
         action = dist.sample()
-        logprob = dist.log_prob(action)
+        log_prob = dist.log_prob(action)
 
-        return action.item(), logprob
+        return action.item(), log_prob
 
 
 class REINFORCEContinuous(REINFORCE):
@@ -102,24 +99,23 @@ class REINFORCEContinuous(REINFORCE):
         REINFORCE: _description_
     """
 
-    def __init__(self, num_inputs: int, action_space: gym.spaces.box.Box,
-                 learning_rate: float, list_layer: list, _):
+    def __init__(self, obs_space: int, action_space: gym.spaces.box.Box,
+                 learning_rate: float, list_layer: list):
         """
         _summary_
 
         Args:
-            num_inputs: _description_
+            obs_space: size of the observation
             action_space: _description_
             learning_rate: _description_
             list_layer: _description_
-            _: _description_
         """
 
         super(REINFORCEContinuous, self).__init__()
 
         self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = LinearNet(num_inputs,
+        self._model = LinearNet(obs_space,
                                 action_space,
                                 learning_rate,
                                 list_layer,

@@ -60,7 +60,7 @@ def main():
 
         current_state = env.reset()
         next_state = None
-        states, actions, next_states, rewards, flags, logprobs = [], [], [], [], [], []
+        states, actions, next_states, rewards, flags, log_probs = [], [], [], [], [], []
         terminated, truncated = False, False
 
         while not terminated and not truncated:
@@ -76,7 +76,7 @@ def main():
             next_states.append(next_state)
             rewards.append(reward)
             flags.append(int(terminated))
-            logprobs.append(log_prob)
+            log_probs.append(log_prob)
 
             current_state = next_state
 
@@ -91,8 +91,8 @@ def main():
             torch.from_numpy(np.array(rewards)).to(torch.device("cuda")),
             "flags":
             torch.from_numpy(np.array(flags)).to(torch.device("cuda")),
-            "logprobs":
-            torch.stack(logprobs).squeeze()
+            "log_probs":
+            torch.stack(log_probs).squeeze()
         })
 
         if not t % log_every_n:

@@ -8,15 +8,15 @@ from rlgym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
 class Policy:
     """
-    _summary_
+    Interface class between any Gym environment and any type of
+    algortihms implemented.
     """
 
     def __init__(self, type_algorithm: str, obversation_space: int,
                  action_space: gym.spaces.box.Box, learning_rate: float,
                  list_layer: list, is_shared_network: bool):
         """
-        Interface class between any Gym environment and any type of
-        algortihms implemented.
+        Constructs the Policy class.
 
         Args:
             type_algorithm: type of algorithm for the learning method.
@@ -39,7 +39,8 @@ class Policy:
 
         if type_algorithm == "reinforce":
             self.algorithm = REINFORCEContinuous(
-                *args) if self.is_continuous else REINFORCEDiscrete(*args)
+                *args[:-1]) if self.is_continuous else REINFORCEDiscrete(
+                    *args[:-1])
 
         elif type_algorithm == "a2c":
             self.algorithm = A2CContinuous(
@@ -83,7 +84,7 @@ class Policy:
         Update the model based on the training data.
 
         Args:
-            minibatch: Minibatch of data from training.
+            minibatch: batch of data from training.
         """
 
         self.algorithm.update_policy(minibatch)

@@ -7,10 +7,9 @@ import torch.optim as optim
 
 class Parallel(nn.Module):
     """
-    _summary_
-
-    Args:
-        nn: _description_
+    Neural layer that computes two nn.Linear in parallel as output.
+    Used in continous environments to compute the mean and sigma value, 
+    from 1 to n actions.
     """
 
     def __init__(self, mean_layer: torch.nn.modules.linear.Linear,
@@ -19,8 +18,8 @@ class Parallel(nn.Module):
         _summary_
 
         Args:
-            mean_layer: _description_
-            sigma_layer: _description_
+            mean_layer: nn.Linear for the mean value(s).
+            sigma_layer: nn.Linear for the sigma value(s).
         """
 
         super().__init__()
@@ -32,29 +31,33 @@ class Parallel(nn.Module):
         _summary_
 
         Args:
-            inputs: _description_
+            inputs: data from a precedent nn.Linear layer.
 
         Returns:
-            _description_
+            outputs as list of 2 torch.Tensor.
         """
 
         return [module(inputs) for module in self.list_module]
 
 
 class LinearNet(nn.Module):
+    """
+    Linear neural network.
+    """
 
-    def __init__(self, num_inputs: int,
-                 action_space: Union[int, gym.spaces.box.Box],
+    def __init__(self, obs_space: int, action_space: Union[int,
+                                                           gym.spaces.box.Box],
                  learning_rate: float, list_layer: list, is_continuous: bool):
         """
         _summary_
 
         Args:
-            num_inputs: _description_
+            obs_space: size of the observation
             action_space: _description_
             learning_rate: _description_
             list_layer: _description_
-            is_continuous: _description_
+            is_continuous: boolean, True if the environment is continuous,
+            False if it is discrete.
         """
 
         super(LinearNet, self).__init__()
@@ -69,7 +72,7 @@ class LinearNet(nn.Module):
 
         self.neural_net = nn.Sequential()
 
-        current_layer_value = num_inputs
+        current_layer_value = obs_space
 
         for layer_value in list_layer:
             self.neural_net.append(nn.Linear(current_layer_value, layer_value))
@@ -95,21 +98,18 @@ class LinearNet(nn.Module):
 
 class ActorCriticNet(nn.Module):
     """
-    _summary_
-
-    Args:
-        nn: _description_
+    Actor Critic neural network.
     """
 
-    def __init__(self, num_inputs: int,
-                 action_space: Union[int, gym.spaces.box.Box],
+    def __init__(self, obs_space: int, action_space: Union[int,
+                                                           gym.spaces.box.Box],
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool, is_continuous: bool):
         """
         _summary_
 
         Args:
-            num_inputs: _description_
+            obs_space: size of the observation
             action_space: _description_
             learning_rate: _description_
             list_layer: _description_
@@ -123,7 +123,7 @@ class ActorCriticNet(nn.Module):
         self.critic_neural_net = None
         self.optimizer = None
 
-        current_layer_value = num_inputs
+        current_layer_value = obs_space
 
         if is_continuous:
             num_actions = action_space.shape[0]
