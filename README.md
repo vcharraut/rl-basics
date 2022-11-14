@@ -4,7 +4,7 @@
 
 # STATUS : WORK IN PROGRESS
 
-The goal of this repo is to implement any RL algorithms and try to benchmarks them with the [Gym](https://github.com/openai/gym) framework made by OpenAI.  
+The goal of this repository is to implement any RL algorithms and try to benchmarks them in the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.  
 Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
 
 **Policy based:**
