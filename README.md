@@ -24,7 +24,6 @@ Clone the code repo and install the requirements.
 ```
 git clone https://github.com/valentin-cnt/rl-gym.git
 cd rl-gym
-pip install -r requirements.txt
 ```
 
 ---

@@ -1,10 +1,10 @@
 import torch
-import gym
-import numpy
+import gymnasium as gym
+import numpy as np
 from torch.distributions import Categorical, Normal
 from torch.nn.functional import softmax
-from rlgym.algorithm.base import Base
-from rlgym.neuralnet import LinearNet
+from rl_gym.algorithm.base import Base
+from rl_gym.neuralnet import LinearNet
 
 
 class REINFORCE(Base):
@@ -122,7 +122,7 @@ class REINFORCEContinuous(REINFORCE):
                                 is_continuous=True)
         self._model.cuda()
 
-    def act(self, state: torch.Tensor) -> tuple[numpy.ndarray, torch.Tensor]:
+    def act(self, state: torch.Tensor) -> tuple[np.ndarray, torch.Tensor]:
         """
         _summary_
 

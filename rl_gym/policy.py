@@ -1,9 +1,9 @@
 import torch
-import gym
+import gymnasium as gym
 import numpy
-from rlgym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
-from rlgym.algorithm.ppo import PPOContinuous, PPODiscrete
-from rlgym.algorithm.a2c import A2CDiscrete, A2CContinuous
+from rl_gym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
+from rl_gym.algorithm.ppo import PPOContinuous, PPODiscrete
+from rl_gym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
 
 class Policy:
@@ -52,9 +52,6 @@ class Policy:
         elif type_algorithm == "ppo":
             self.algorithm = PPOContinuous(
                 *args) if self.is_continuous else PPODiscrete(*args)
-
-        elif type_algorithm == "dqn":
-            raise NotImplementedError()
 
         elif type_algorithm == "ddpg":
             raise NotImplementedError()

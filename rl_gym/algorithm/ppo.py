@@ -1,10 +1,10 @@
 import torch
-import gym
-import numpy
+import gymnasium as gym
+import numpy as np
 from torch.nn.functional import softmax
 from torch.distributions import Categorical, Normal
-from rlgym.algorithm.base import Base
-from rlgym.neuralnet import ActorCriticNet
+from rl_gym.algorithm.base import Base
+from rl_gym.neuralnet import ActorCriticNet
 from abc import abstractmethod
 
 
@@ -216,7 +216,7 @@ class PPOContinuous(PPO):
 
         return log_prob, dist_entropy, state_values
 
-    def act(self, state: torch.Tensor) -> tuple[numpy.ndarray, torch.Tensor]:
+    def act(self, state: torch.Tensor) -> tuple[np.ndarray, torch.Tensor]:
         """
         _summary_
 

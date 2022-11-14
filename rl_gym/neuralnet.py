@@ -1,6 +1,6 @@
 import torch
 from typing import Union
-import gym
+import gymnasium as gym
 import torch.nn as nn
 import torch.optim as optim
 
@@ -8,7 +8,7 @@ import torch.optim as optim
 class Parallel(nn.Module):
     """
     Neural layer that computes two nn.Linear in parallel as output.
-    Used in continous environments to compute the mean and sigma value, 
+    Used in continous environments to compute the mean and sigma value,
     from 1 to n actions.
     """
 
