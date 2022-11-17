@@ -1,20 +1,18 @@
 [tool.poetry]
 name = "rl_gym"
 version = "0.1.0"
-description = "Deep Renforcement Learning project made with Pytorch and Gym."
+description = ""
 authors = ["Valentin Canete <valentin.canete@gmail.com>"]
-license = "GNU General Public License v3.0"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-numpy = "^1.23.4"
-matplotlib = "^3.6.2"
-tqdm = "^4.64.1"
-torch = {url = "https://download.pytorch.org/whl/cu117/torch-1.13.0%2Bcu117-cp310-cp310-linux_x86_64.whl"}
+torch = "1.12.*"
 Gymnasium = {extras = ["all"], version = "^0.26.3"}
 
 [tool.poetry.dev-dependencies]
 ipykernel = "^6.17.1"
+ipywidgets = "^8.0.2"
+tensorboard = "^2.11.0"
 yapf = "^0.32.0"
 toml = "^0.10.2"
 

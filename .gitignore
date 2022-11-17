@@ -1,11 +1,11 @@
 __pycache__/
 .vscode/
 .venv/
+runs/
 
 *.pt
-debug.ipynb
 run_*
-render.py
 poetry.lock
 list_env.txt
+debug.ipynb
 render.py
