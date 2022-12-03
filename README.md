@@ -9,12 +9,11 @@ Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
 
 **Policy based:**
 
-- [x] REINFORCE [[1]](#references)
-- [x] A2C [[2]](#references)
-- [x] PPO [[3]](#references)
-- [ ] DDPG [[4]](#references)
-- [ ] TD3 [[5]](#references)
-- [ ] SAC [[6]](#references)
+- [x] A2C [[1]](#references)
+- [x] PPO [[2]](#references)
+- [ ] DDPG [[3]](#references)
+- [ ] TD3 [[4]](#references)
+- [ ] SAC [[5]](#references)
 ---
 
 ## Setup
@@ -42,9 +41,8 @@ cd rl-gym
 
 ## References
 
-- [1] [Policy Gradient Methods for Reinforcement Learning with FunctionApproximation](https://proceedings.neurips.cc/paper/1999/file/464d828b85b0bed98e80ade0a5c43b0f-Paper.pdf)
-- [2] [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
-- [3] [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
-- [4] [Deterministic Policy Gradient Algorithms](https://proceedings.mlr.press/v32/silver14.pdf)
-- [5] [Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477)
-- [6] [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor](https://arxiv.org/abs/1801.01290)
+- [1] [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
+- [2] [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
+- [3] [Deterministic Policy Gradient Algorithms](https://proceedings.mlr.press/v32/silver14.pdf)
+- [4] [Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477)
+- [5] [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor](https://arxiv.org/abs/1801.01290)
