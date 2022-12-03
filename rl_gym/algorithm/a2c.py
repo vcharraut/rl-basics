@@ -1,5 +1,4 @@
 import torch
-import gymnasium as gym
 import numpy as np
 from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
@@ -25,13 +24,12 @@ class A2C(Base):
         states = minibatch["states"]
         rewards = minibatch["rewards"]
         log_probs = minibatch["log_probs"]
+        flags = minibatch["flags"]
 
-        discounted_rewards = self._discounted_rewards(rewards)
-
+        discounted_rewards = self._discounted_rewards(rewards, flags)
         values = self._model.critic(states).squeeze()
 
-        with torch.no_grad():
-            advantages = (discounted_rewards - values)
+        advantages = (discounted_rewards - values)
 
         policy_loss = (-log_probs * advantages).mean()
         value_loss = mse_loss(values, discounted_rewards)
@@ -48,8 +46,7 @@ class A2CDiscrete(A2C):
     A2C implementation for discrete environments.
     """
 
-    def __init__(self, obs_space: int,
-                 action_space: gym.spaces.discrete.Discrete,
+    def __init__(self, obversation_space: tuple, action_space: tuple,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
@@ -63,12 +60,10 @@ class A2CDiscrete(A2C):
             is_shared_network: _description_
         """
 
-        super(A2CDiscrete, self).__init__()
+        super(A2CDiscrete, self).__init__(obversation_space, action_space)
 
-        num_actionss = action_space.n
-
-        self._model = ActorCriticNet(obs_space,
-                                     num_actionss,
+        self._model = ActorCriticNet(obversation_space,
+                                     action_space,
                                      learning_rate,
                                      list_layer,
                                      is_shared_network,
@@ -86,15 +81,15 @@ class A2CDiscrete(A2C):
             _description_
         """
 
-        actor_value = self._model.actor(state)
+        actor_value = self._model.actor_discrete(state)
 
-        probs = softmax(actor_value, dim=0)
+        probs = softmax(actor_value, dim=-1)
         dist = Categorical(probs)
 
         action = dist.sample()
         log_prob = dist.log_prob(action)
 
-        return action.item(), log_prob
+        return action.cpu().numpy(), log_prob
 
 
 class A2CContinuous(A2C):
@@ -102,7 +97,7 @@ class A2CContinuous(A2C):
     A2C implementation for continuous environments.
     """
 
-    def __init__(self, obs_space: int, action_space: gym.spaces.box.Box,
+    def __init__(self, obversation_space: tuple, action_space: tuple,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
@@ -116,11 +111,11 @@ class A2CContinuous(A2C):
             is_shared_network: _description_
         """
 
-        super(A2CContinuous, self).__init__()
+        super(A2CContinuous, self).__init__(obversation_space, action_space)
 
-        self.bound_interval = torch.Tensor(action_space.high).cuda()
+        # self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = ActorCriticNet(obs_space,
+        self._model = ActorCriticNet(obversation_space,
                                      action_space,
                                      learning_rate,
                                      list_layer,
@@ -139,13 +134,14 @@ class A2CContinuous(A2C):
             _description_
         """
 
-        actor_value = self._model.actor(state)
+        with torch.no_grad():
+            actor_value = self._model.actor_continuous(state)
 
-        mean = torch.tanh(actor_value[0]) * self.bound_interval
-        variance = torch.sigmoid(actor_value[1])
+        mean = actor_value[0]
+        variance = actor_value[1]
         dist = Normal(mean, variance)
 
         action = dist.sample()
-        log_prob = dist.log_prob(action).sum()
+        log_prob = dist.log_prob(action).sum(-1)
 
         return action.cpu().numpy(), log_prob

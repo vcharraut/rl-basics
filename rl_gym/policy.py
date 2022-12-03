@@ -1,7 +1,6 @@
 import torch
 import gymnasium as gym
-import numpy
-from rl_gym.algorithm.reinforce import REINFORCEContinuous, REINFORCEDiscrete
+import numpy as np
 from rl_gym.algorithm.ppo import PPOContinuous, PPODiscrete
 from rl_gym.algorithm.a2c import A2CDiscrete, A2CContinuous
 
@@ -12,7 +11,8 @@ class Policy:
     algortihms implemented.
     """
 
-    def __init__(self, type_algorithm: str, obversation_space: int,
+    def __init__(self, type_algorithm: str,
+                 obversation_space: gym.spaces.box.Box,
                  action_space: gym.spaces.box.Box, learning_rate: float,
                  list_layer: list, is_shared_network: bool):
         """
@@ -29,20 +29,18 @@ class Policy:
         """
 
         type_algorithm = type_algorithm.lower()
+
+        self.is_continuous = type(action_space).__name__.lower() == "box"
+
+        action_shape = action_space.shape if self.is_continuous else (
+            action_space.n, )
+
         args = [
-            obversation_space, action_space, learning_rate, list_layer,
+            obversation_space.shape, action_shape, learning_rate, list_layer,
             is_shared_network
         ]
 
-        action_space_type = type(action_space).__name__.lower()
-        self.is_continuous = True if action_space_type == "box" else False
-
-        if type_algorithm == "reinforce":
-            self.algorithm = REINFORCEContinuous(
-                *args[:-1]) if self.is_continuous else REINFORCEDiscrete(
-                    *args[:-1])
-
-        elif type_algorithm == "a2c":
+        if type_algorithm == "a2c":
             self.algorithm = A2CContinuous(
                 *args) if self.is_continuous else A2CDiscrete(*args)
 
@@ -62,7 +60,7 @@ class Policy:
         elif type_algorithm == "sac":
             raise NotImplementedError()
 
-    def get_action(self, state: numpy.ndarray) -> tuple:
+    def get_action(self, state: np.ndarray) -> tuple:
         """
         Get the optimal action based on the current state.
 
@@ -75,6 +73,27 @@ class Policy:
 
         state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
         return self.algorithm.act(state_torch)
+
+    def get_obs_and_action_shape(self):
+        obversation_shape, action_shape = self.algorithm.get_obs_and_action_shape(
+        )
+        if not self.is_continuous:
+            action_shape = ()
+        return obversation_shape, action_shape
+
+    def add_reward_to_tensorboard(self, reward):
+        self.algorithm.writer.add_scalar("Rollout/reward", reward,
+                                         self.algorithm.global_step)
+
+    def add_hparams_to_tensorboard(self, learning_rate, layer, reward):
+        self.algorithm.writer.add_hparams(
+            {
+                "learning_rate": learning_rate,
+                "layer": layer
+            }, {"Reward": reward})
+
+    def close_writer(self):
+        self.algorithm.writer.close()
 
     def update_policy(self, minibatch: dict):
         """

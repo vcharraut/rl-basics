@@ -1,105 +1,92 @@
-import argparse
+from tqdm import tqdm
 import gymnasium as gym
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
-from tqdm import tqdm
 from rl_gym.policy import Policy
 
-plt.style.use("bmh")
+
+def make_env(env_id, seed):
+
+    def thunk():
+        env = gym.make(env_id)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
+        return env
+
+    return thunk
 
 
-def main():
+if __name__ == "__main__":
+    ENV_NAME = "LunarLanderContinuous-v2"
+    ALGO = "ppo"
+    N_EPISODE = 1000
+    LEARNING_RATE = 3e-4
+    LIST_LAYER = [128, 128]
+    IS_SHARED_NETWORK = False
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--algo",
-                        type=str,
-                        default="a2c",
-                        help="Algortihms to be used for the learning")
-    parser.add_argument("--env",
-                        type=str,
-                        default="CartPole-v1",
-                        help="Gym environment")
-    parser.add_argument("--lr", type=int, default=1e-3, help="Learning rite")
-    parser.add_argument("--size_hidden",
-                        type=int,
-                        default=128,
-                        help="Size of hidden layers")
-    parser.add_argument("--number_hidden",
-                        type=int,
-                        default=2,
-                        help="Number of hidden layers")
-    parser.add_argument("--is_shared_network",
-                        action="store_true",
-                        help="Display or not the agent in the environment")
+    N_ENV = 16
+    N_STEPS = 2048
 
-    args = parser.parse_args()
+    device = torch.device("cuda")
 
-    env = gym.make(args.env, new_step_api=True)
-    n_episode = 1500
-    log_every_n = n_episode / 100
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(ENV_NAME, 0 + i) for i in range(N_ENV)])
 
-    obversation_space = env.observation_space.shape[0]
-    action_space = env.action_space
-    action_space_type = type(env.action_space).__name__.lower()
+    obversation_space = envs.single_observation_space
+    action_space = envs.single_action_space
 
-    if action_space_type == "discrete":
-        is_continuous = False
-    elif action_space_type == "box":
-        is_continuous = True
-    else:
-        raise Exception("Unvalid type of action_space")
+    policy = Policy(ALGO, obversation_space, action_space, LEARNING_RATE,
+                    LIST_LAYER, IS_SHARED_NETWORK)
 
-    policy = Policy(args.algo, obversation_space, action_space, is_continuous,
-                    args.lr, args.size_hidden, args.number_hidden,
-                    args.is_shared_network)
+    obversation_shape, action_shape = policy.get_obs_and_action_shape()
 
-    log_rewards = []
+    current_state, _ = envs.reset()
 
-    for t in tqdm(range(n_episode)):
+    for episode in tqdm(range(N_EPISODE)):
+        states = torch.zeros((N_STEPS, N_ENV) + obversation_shape).to(device)
+        actions = torch.zeros((N_STEPS, N_ENV) + action_shape).to(device)
+        logprobs = torch.zeros((N_STEPS, N_ENV)).to(device)
+        rewards = torch.zeros((N_STEPS, N_ENV)).to(device)
+        flags = torch.zeros((N_STEPS, N_ENV)).to(device)
+        next_states = torch.zeros((N_STEPS, N_ENV) +
+                                  obversation_space.shape).to(device)
 
-        current_state = env.reset()
-        next_state = None
-        states, actions, next_states, rewards, flags, log_probs = [], [], [], [], [], []
-        terminated, truncated = False, False
+        list_rewards = []
 
-        while not terminated and not truncated:
+        for i in range(N_STEPS):
             action, log_prob = policy.get_action(current_state)
 
-            if is_continuous:
-                action = np.array(action, ndmin=1)
+            next_state, reward, terminated, _, info = envs.step(action)
 
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            if info:
+                idx = info["_final_info"].nonzero()[0]
+                values = info["final_info"][idx]
+                for x in values:
+                    list_rewards.append(x["episode"]["r"])
 
-            states.append(current_state)
-            actions.append(action)
-            next_states.append(next_state)
-            rewards.append(reward)
-            flags.append(int(terminated))
-            log_probs.append(log_prob)
+            states[i] = torch.from_numpy(current_state).float()
+            actions[i] = torch.from_numpy(action).float()
+            next_states[i] = torch.from_numpy(next_state).float()
+            rewards[i] = torch.from_numpy(reward).float()
+            flags[i] = torch.from_numpy(terminated * 1).float()
+            logprobs[i] = log_prob
 
             current_state = next_state
 
         policy.update_policy({
-            "states":
-            torch.from_numpy(np.array(states)).to(torch.device("cuda")),
-            "actions":
-            torch.from_numpy(np.array(actions)).to(torch.device("cuda")),
-            "next_states":
-            torch.from_numpy(np.array(next_states)).to(torch.device("cuda")),
-            "rewards":
-            torch.from_numpy(np.array(rewards)).to(torch.device("cuda")),
-            "flags":
-            torch.from_numpy(np.array(flags)).to(torch.device("cuda")),
-            "log_probs":
-            torch.stack(log_probs).squeeze()
+            "states": states,
+            "actions": actions,
+            "next_states": next_states,
+            "rewards": rewards,
+            "flags": flags,
+            "log_probs": logprobs
         })
 
-        if not t % log_every_n:
-            log_rewards.append(np.sum(rewards))
+        mean_rewards = np.array(list_rewards).mean()
+        policy.add_reward_to_tensorboard(mean_rewards)
 
-    return log_rewards
-
-
-if __name__ == "__main__":
-    main()
+    policy.add_hparams_to_tensorboard(LEARNING_RATE, LIST_LAYER[0],
+                                      mean_rewards)
+    envs.close()
+    policy.close()

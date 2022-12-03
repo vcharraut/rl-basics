@@ -1,11 +1,10 @@
-import torch
-import gymnasium as gym
+from abc import abstractmethod
 import numpy as np
-from torch.nn.functional import softmax
+import torch
+from torch.nn.functional import softmax, mse_loss
 from torch.distributions import Categorical, Normal
 from rl_gym.algorithm.base import Base
 from rl_gym.neuralnet import ActorCriticNet
-from abc import abstractmethod
 
 
 class PPO(Base):
@@ -13,12 +12,12 @@ class PPO(Base):
     _summary_
     """
 
-    def __init__(self):
+    def __init__(self, obversation_space: tuple, action_space: tuple):
         """
         _summary_
         """
 
-        super(PPO, self).__init__()
+        super(PPO, self).__init__(obversation_space, action_space)
 
         self.__n_optim = 3
         self.__eps_clip = 0.2
@@ -39,14 +38,28 @@ class PPO(Base):
             keys are (states, actions, next_states, rewards, flags, log_probs)
         """
 
-        states = minibatch["states"]
-        actions = minibatch["actions"]
-        next_states = minibatch["next_states"]
-        rewards = minibatch["rewards"]
-        flags = minibatch["flags"]
-        old_log_probs = minibatch["log_probs"]
+        returns, advantages = self._gae(minibatch["states"],
+                                        minibatch["next_states"],
+                                        minibatch["rewards"],
+                                        minibatch["flags"])
 
-        returns, advantages = self._gae(states, next_states, rewards, flags)
+        states = minibatch["states"].reshape((-1, ) + self._obversation_space)
+        actions = minibatch["actions"].reshape((-1, ) + self._action_space)
+        # actions = minibatch["actions"].reshape(-1)
+        old_log_probs = minibatch["log_probs"].reshape(-1)
+        returns = returns.reshape(-1)
+        advantages = advantages.reshape(-1)
+
+        batch_size = len(minibatch["rewards"])
+        batch_index = np.arange(batch_size)
+        np.random.shuffle(batch_index)
+        batch_index = batch_index[:2048]
+
+        states = states[batch_index]
+        actions = actions[batch_index]
+        old_log_probs = old_log_probs[batch_index]
+        returns = returns[batch_index]
+        advantages = advantages[batch_index]
 
         for _ in range(self.__n_optim):
             log_probs, dist_entropy, state_values = self._evaluate(
@@ -61,7 +74,7 @@ class PPO(Base):
 
             policy_loss = -torch.min(surr1, surr2)
 
-            value_loss = self.__value_constant * ((state_values - returns)**2)
+            value_loss = self.__value_constant * mse_loss(state_values, returns)
 
             entropy_bonus = self.__entropy_constant * dist_entropy
 
@@ -70,6 +83,12 @@ class PPO(Base):
             self._model.optimizer.zero_grad()
             loss.backward()
             self._model.optimizer.step()
+
+        self.writer.add_scalar("Update/policy_loss", policy_loss.mean(),
+                               self.global_step)
+        self.writer.add_scalar("Update/value_loss", value_loss.mean(),
+                               self.global_step)
+        self.writer.add_scalar("Update/loss", loss, self.global_step)
 
 
 class PPODiscrete(PPO):
@@ -80,8 +99,7 @@ class PPODiscrete(PPO):
         PPO: _description_
     """
 
-    def __init__(self, obs_space: int,
-                 action_space: gym.spaces.discrete.Discrete,
+    def __init__(self, obversation_space: tuple, action_space: tuple,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
@@ -95,12 +113,10 @@ class PPODiscrete(PPO):
             is_shared_network: _description_
         """
 
-        super(PPODiscrete, self).__init__()
+        super(PPODiscrete, self).__init__(obversation_space, action_space)
 
-        num_actionss = action_space.n
-
-        self._model = ActorCriticNet(obs_space,
-                                     num_actionss,
+        self._model = ActorCriticNet(obversation_space,
+                                     action_space,
                                      learning_rate,
                                      list_layer,
                                      is_shared_network,
@@ -122,10 +138,10 @@ class PPODiscrete(PPO):
             _type_: _description_
         """
 
-        action_values = self._model.actor(states)
+        action_values = self._model.actor_discrete(states)
         state_values = self._model.critic(states).squeeze()
 
-        action_prob = softmax(action_values, dim=1)
+        action_prob = softmax(action_values, dim=-1)
         action_dist = Categorical(action_prob)
 
         log_prob = action_dist.log_prob(actions)
@@ -145,15 +161,20 @@ class PPODiscrete(PPO):
         """
 
         with torch.no_grad():
-            actor_value = self._model.actor(state)
+            actor_value = self._model.actor_discrete(state)
 
-        probs = softmax(actor_value, dim=0)
+        probs = softmax(actor_value, dim=-1)
         dist = Categorical(probs)
 
         action = dist.sample()
         log_prob = dist.log_prob(action)
 
-        return action.item(), log_prob
+        # print("actor_value: ", actor_value)
+        # print("probs: ", probs)
+        # print("action: ", action)
+        # print()
+
+        return action.cpu().numpy(), log_prob
 
 
 class PPOContinuous(PPO):
@@ -164,7 +185,7 @@ class PPOContinuous(PPO):
         PPO: _description_
     """
 
-    def __init__(self, obs_space: int, action_space: gym.spaces.box.Box,
+    def __init__(self, obversation_space: tuple, action_space: tuple,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool):
         """
@@ -178,16 +199,17 @@ class PPOContinuous(PPO):
             is_shared_network: _description_
         """
 
-        super(PPOContinuous, self).__init__()
+        super(PPOContinuous, self).__init__(obversation_space, action_space)
 
-        self.bound_interval = torch.Tensor(action_space.high).cuda()
+        # self.bound_interval = torch.Tensor(action_space.high).cuda()
 
-        self._model = ActorCriticNet(obs_space,
+        self._model = ActorCriticNet(obversation_space,
                                      action_space,
                                      learning_rate,
                                      list_layer,
                                      is_shared_network,
                                      is_continuous=True)
+
         self._model.cuda()
 
     def _evaluate(
@@ -204,15 +226,15 @@ class PPOContinuous(PPO):
             _type_: _description_
         """
 
-        action_values = self._model.actor(states)
+        action_values = self._model.actor_continuous(states)
         state_values = self._model.critic(states).squeeze()
 
-        mean = torch.tanh(action_values[0])
-        variance = torch.sigmoid(action_values[1])
+        mean = action_values[0]
+        variance = action_values[1]
         dist = Normal(mean, variance)
 
-        log_prob = dist.log_prob(actions).sum(dim=1)
-        dist_entropy = dist.entropy().sum(dim=1)
+        log_prob = dist.log_prob(actions).sum(-1)
+        dist_entropy = dist.entropy().sum(-1)
 
         return log_prob, dist_entropy, state_values
 
@@ -228,13 +250,18 @@ class PPOContinuous(PPO):
         """
 
         with torch.no_grad():
-            actor_value = self._model.actor(state)
+            actor_value = self._model.actor_continuous(state)
 
-        mean = torch.tanh(actor_value[0]) * self.bound_interval
-        variance = torch.sigmoid(actor_value[1])
+        mean = actor_value[0]
+        variance = actor_value[1]
         dist = Normal(mean, variance)
 
         action = dist.sample()
-        log_prob = dist.log_prob(action).sum()
+        log_prob = dist.log_prob(action).sum(-1)
+
+        self.writer.add_scalar("Rollout/Mean", mean.mean(), self.global_step)
+        self.writer.add_scalar("Rollout/Variance", variance.mean(),
+                               self.global_step)
+        self.increment_step()
 
         return action.cpu().numpy(), log_prob
