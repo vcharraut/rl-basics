@@ -81,8 +81,8 @@ class ActorCriticNet(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-    def forward(self, state):
-        return self.actor_neural_net(state)
+    def forward(self):
+        pass
 
     def actor_discrete(self, state: torch.Tensor) -> torch.Tensor:
         """

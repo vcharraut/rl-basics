@@ -75,22 +75,11 @@ class Policy:
         return self.algorithm.act(state_torch)
 
     def get_obs_and_action_shape(self):
-        obversation_shape, action_shape = self.algorithm.get_obs_and_action_shape(
-        )
-        if not self.is_continuous:
-            action_shape = ()
-        return obversation_shape, action_shape
+        return self.algorithm.get_obs_and_action_shape()
 
     def add_reward_to_tensorboard(self, reward):
         self.algorithm.writer.add_scalar("Rollout/reward", reward,
                                          self.algorithm.global_step)
-
-    def add_hparams_to_tensorboard(self, learning_rate, layer, reward):
-        self.algorithm.writer.add_hparams(
-            {
-                "learning_rate": learning_rate,
-                "layer": layer
-            }, {"Reward": reward})
 
     def close_writer(self):
         self.algorithm.writer.close()

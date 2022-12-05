@@ -88,12 +88,11 @@ class Base(ABC):
             advantages: values from the advantage function
         """
 
-        # rewards = self._normalize_tensor(rewards)
+        rewards = self._normalize_tensor(rewards)
 
         with torch.no_grad():
             value_next_states = self._model.critic(next_states).squeeze()
             value_states = self._model.critic(states).squeeze()
-
         td_target = rewards + self.__gamma * value_next_states * (1. - flags)
         delta = td_target - value_states
 
@@ -101,7 +100,8 @@ class Base(ABC):
         adv = torch.zeros(rewards.size(1)).to(torch.device("cuda"))
 
         for i in reversed(range(delta.size(0))):
-            adv = self.__gamma * self.__lmbda * adv + delta[i]
+            adv = self.__gamma * self.__lmbda * adv * (1. -
+                                                       flags[i]) + delta[i]
             advantages[i] = adv
 
         return td_target, advantages

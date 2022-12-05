@@ -19,7 +19,7 @@ class PPO(Base):
 
         super(PPO, self).__init__(obversation_space, action_space)
 
-        self.__n_optim = 3
+        self.__n_optim = 1
         self.__eps_clip = 0.2
         self.__value_constant = 0.5
         self.__entropy_constant = 0.01
@@ -27,6 +27,21 @@ class PPO(Base):
     @abstractmethod
     def _evaluate(self, states, actions):
         pass
+
+    def shuffle_batch(self, minibatch, returns, advantages):
+        states = minibatch["states"].reshape((-1, ) + self._obversation_space)
+        actions = minibatch["actions"].reshape((-1, ) + self._action_space)
+        old_log_probs = minibatch["log_probs"].reshape(-1)
+        returns = returns.reshape(-1)
+        advantages = advantages.reshape(-1)
+
+        batch_size = len(minibatch["rewards"])
+        batch_index = np.arange(batch_size)
+        np.random.shuffle(batch_index)
+        batch_index = batch_index[:2048]
+
+        return states[batch_index], actions[batch_index], old_log_probs[
+            batch_index], returns[batch_index], advantages[batch_index]
 
     def update_policy(self, minibatch: dict):
         """
@@ -43,23 +58,8 @@ class PPO(Base):
                                         minibatch["rewards"],
                                         minibatch["flags"])
 
-        states = minibatch["states"].reshape((-1, ) + self._obversation_space)
-        actions = minibatch["actions"].reshape((-1, ) + self._action_space)
-        # actions = minibatch["actions"].reshape(-1)
-        old_log_probs = minibatch["log_probs"].reshape(-1)
-        returns = returns.reshape(-1)
-        advantages = advantages.reshape(-1)
-
-        batch_size = len(minibatch["rewards"])
-        batch_index = np.arange(batch_size)
-        np.random.shuffle(batch_index)
-        batch_index = batch_index[:2048]
-
-        states = states[batch_index]
-        actions = actions[batch_index]
-        old_log_probs = old_log_probs[batch_index]
-        returns = returns[batch_index]
-        advantages = advantages[batch_index]
+        states, actions, old_log_probs, returns, advantages = self.shuffle_batch(
+            minibatch, returns, advantages)
 
         for _ in range(self.__n_optim):
             log_probs, dist_entropy, state_values = self._evaluate(
@@ -72,21 +72,22 @@ class PPO(Base):
             surr2 = torch.clamp(ratios, 1. - self.__eps_clip,
                                 1. + self.__eps_clip) * advantages
 
-            policy_loss = -torch.min(surr1, surr2)
+            policy_loss = -torch.min(surr1, surr2).mean()
 
-            value_loss = self.__value_constant * mse_loss(state_values, returns)
+            value_loss = self.__value_constant * mse_loss(
+                state_values, returns)
 
-            entropy_bonus = self.__entropy_constant * dist_entropy
+            entropy_bonus = self.__entropy_constant * dist_entropy.mean()
 
-            loss = (policy_loss + value_loss - entropy_bonus).mean()
+            loss = policy_loss + value_loss - entropy_bonus
 
             self._model.optimizer.zero_grad()
             loss.backward()
             self._model.optimizer.step()
 
-        self.writer.add_scalar("Update/policy_loss", policy_loss.mean(),
+        self.writer.add_scalar("Update/policy_loss", policy_loss,
                                self.global_step)
-        self.writer.add_scalar("Update/value_loss", value_loss.mean(),
+        self.writer.add_scalar("Update/value_loss", value_loss,
                                self.global_step)
         self.writer.add_scalar("Update/loss", loss, self.global_step)
 
@@ -113,7 +114,7 @@ class PPODiscrete(PPO):
             is_shared_network: _description_
         """
 
-        super(PPODiscrete, self).__init__(obversation_space, action_space)
+        super(PPODiscrete, self).__init__(obversation_space, ())
 
         self._model = ActorCriticNet(obversation_space,
                                      action_space,
@@ -169,10 +170,7 @@ class PPODiscrete(PPO):
         action = dist.sample()
         log_prob = dist.log_prob(action)
 
-        # print("actor_value: ", actor_value)
-        # print("probs: ", probs)
-        # print("action: ", action)
-        # print()
+        self.increment_step()
 
         return action.cpu().numpy(), log_prob
 
@@ -262,6 +260,7 @@ class PPOContinuous(PPO):
         self.writer.add_scalar("Rollout/Mean", mean.mean(), self.global_step)
         self.writer.add_scalar("Rollout/Variance", variance.mean(),
                                self.global_step)
+
         self.increment_step()
 
         return action.cpu().numpy(), log_prob

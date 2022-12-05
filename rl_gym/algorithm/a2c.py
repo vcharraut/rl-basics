@@ -60,7 +60,7 @@ class A2CDiscrete(A2C):
             is_shared_network: _description_
         """
 
-        super(A2CDiscrete, self).__init__(obversation_space, action_space)
+        super(A2CDiscrete, self).__init__(obversation_space, ())
 
         self._model = ActorCriticNet(obversation_space,
                                      action_space,
@@ -88,6 +88,8 @@ class A2CDiscrete(A2C):
 
         action = dist.sample()
         log_prob = dist.log_prob(action)
+
+        self.increment_step()
 
         return action.cpu().numpy(), log_prob
 
@@ -143,5 +145,7 @@ class A2CContinuous(A2C):
 
         action = dist.sample()
         log_prob = dist.log_prob(action).sum(-1)
+
+        self.increment_step()
 
         return action.cpu().numpy(), log_prob
