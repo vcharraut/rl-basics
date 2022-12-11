@@ -1,13 +1,16 @@
 [tool.poetry]
-name = "rl_gym"
+name = "rl-gym"
 version = "0.1.0"
 description = ""
 authors = ["Valentin Canete <valentin.canete@gmail.com>"]
+readme = "README.md"
+packages = [{include = "rl_gym"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-torch = "1.12.*"
-Gymnasium = {extras = ["all"], version = "^0.26.3"}
+numpy = "^1.23.5"
+Gymnasium = {version = "^0.26.3", extras = ["all"]}
+torch = {url = "https://download.pytorch.org/whl/cu117/torch-1.13.0%2Bcu117-cp310-cp310-linux_x86_64.whl"}
 
 [tool.poetry.dev-dependencies]
 ipykernel = "^6.17.1"
@@ -17,5 +20,5 @@ yapf = "^0.32.0"
 toml = "^0.10.2"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
