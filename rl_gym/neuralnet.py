@@ -4,6 +4,7 @@ from torch import optim, nn
 
 
 def layer_init(in_shape, out_shape, std=np.sqrt(2), bias_const=0.0):
+
     layer = nn.Linear(int(in_shape), int(out_shape))
     nn.init.orthogonal_(layer.weight, std)
     nn.init.constant_(layer.bias, bias_const)
@@ -11,24 +12,10 @@ def layer_init(in_shape, out_shape, std=np.sqrt(2), bias_const=0.0):
 
 
 class ActorCriticNet(nn.Module):
-    """
-    Actor Critic neural network.
-    """
 
     def __init__(self, obversation_space: tuple, action_space: tuple,
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool, is_continuous: bool):
-        """
-        _summary_
-
-        Args:
-            obs_space: size of the observation
-            action_space: _description_
-            learning_rate: _description_
-            list_layer: _description_
-            is_shared_network: _description_
-            is_continuous: _description_
-        """
 
         super(ActorCriticNet, self).__init__()
 
@@ -85,42 +72,15 @@ class ActorCriticNet(nn.Module):
         pass
 
     def actor_discrete(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        _summary_
-
-        Args:
-            state: _description_
-
-        Returns:
-            _description_
-        """
 
         return self.actor_neural_net(state)
 
     def actor_continuous(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        _summary_
-
-        Args:
-            state: _description_
-
-        Returns:
-            _description_
-        """
 
         action_mean = self.actor_neural_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
         return action_mean, action_std
 
     def critic(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        _summary_
-
-        Args:
-            state: _description_
-
-        Returns:
-            _description_
-        """
 
         return self.critic_neural_net(state)
