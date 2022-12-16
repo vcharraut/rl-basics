@@ -9,8 +9,9 @@ packages = [{include = "rl_gym"}]
 [tool.poetry.dependencies]
 python = "^3.10"
 numpy = "^1.23.5"
-Gymnasium = {version = "^0.26.3", extras = ["all"]}
+box2d-py = "2.3.5"
 torch = {url = "https://download.pytorch.org/whl/cu117/torch-1.13.0%2Bcu117-cp310-cp310-linux_x86_64.whl"}
+gymnasium = {extras = ["all"], version = "^0.27.0"}
 
 [tool.poetry.dev-dependencies]
 ipykernel = "^6.17.1"
