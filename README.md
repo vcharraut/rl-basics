@@ -23,6 +23,8 @@ Clone the code repo and install the requirements.
 ```
 git clone https://github.com/valentin-cnt/rl-gym.git
 cd rl-gym
+
+poetry install
 ```
 
 ---
@@ -30,7 +32,12 @@ cd rl-gym
 ## Run
 
 ```
-
+poetry run python main.py
+```
+or
+```
+poetry shell
+python main.py
 ```
 
 ---
@@ -38,6 +45,10 @@ cd rl-gym
 ## Results
 
 ---
+
+## Acknowledgments
+
+ - [CleanRL](https://github.com/vwxyzjn/cleanrl)
 
 ## References
 
