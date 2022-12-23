@@ -3,14 +3,14 @@ name = "rl-gym"
 version = "0.1.0"
 description = ""
 authors = ["Valentin Canete <valentin.canete@gmail.com>"]
+license = "GNU General Public License v3.0"
 readme = "README.md"
 packages = [{include = "rl_gym"}]
 
 [tool.poetry.dependencies]
-python = "^3.10"
-numpy = "^1.23.5"
-box2d-py = "2.3.5"
-torch = {url = "https://download.pytorch.org/whl/cu117/torch-1.13.0%2Bcu117-cp310-cp310-linux_x86_64.whl"}
+python = "^3.11"
+numpy = "^1.24.0"
+torch = "1.13.1"
 gymnasium = {extras = ["all"], version = "^0.27.0"}
 
 [tool.poetry.dev-dependencies]
