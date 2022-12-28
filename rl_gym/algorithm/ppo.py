@@ -1,102 +1,153 @@
-from abc import abstractmethod
 import numpy as np
 import torch
-from torch.nn.functional import softmax, mse_loss
-from torch.distributions import Categorical, Normal
-from torch.nn.utils import clip_grad_norm_
+from torch.nn.functional import mse_loss
+from torch.nn.utils.clip_grad import clip_grad_norm_
 from rl_gym.algorithm.base import Base
-from rl_gym.neuralnet import ActorCriticNet
+from rl_gym.neuralnet import ActorCriticNet, CNNActorCritic
 
 
 class PPO(Base):
 
     def __init__(self, args, obversation_space: tuple, action_space: tuple,
-                 writer):
+                 writer, is_continuous):
 
-        super(PPO, self).__init__(args, obversation_space, action_space,
-                                  writer)
+        super(PPO,
+              self).__init__(args, obversation_space,
+                             action_space if is_continuous else (), writer)
 
-        self.__n_optim = 10
+        self.__n_optim = 4
         self.__eps_clip = 0.2
         self.__value_constant = 0.5
         self.__entropy_constant = 0.01
         self._lmbda = 0.95
 
-    @abstractmethod
-    def _evaluate(self, states, actions):
-        pass
+        self._batch_size = args.batch_size
+        self._minibatch_size = args.minibatch_size
 
-    def shuffle_batch(self, minibatch, returns, advantages):
+        self.is_continuous = is_continuous
 
-        states = minibatch["states"].reshape((-1, ) + self._obversation_space)
-        actions = minibatch["actions"].reshape((-1, ) + self._action_space)
-        old_log_probs = minibatch["log_probs"].reshape(-1)
-        returns = returns.reshape(-1)
-        advantages = advantages.reshape(-1)
+        if args.cnn:
+            self._model = CNNActorCritic(
+                action_space,
+                args.learning_rate,
+            )
+        else:
+            self._model = ActorCriticNet(obversation_space, action_space,
+                                         args.learning_rate, args.layers,
+                                         args.shared_network, is_continuous)
 
-        batch_size = len(minibatch["rewards"])
-        batch_index = np.arange(batch_size)
-        np.random.shuffle(batch_index)
-        batch_index = batch_index[:2048]
+        self.foward = self._model.forward_continuous if is_continuous else self._model.forward_discrete
 
-        return states[batch_index], actions[batch_index], old_log_probs[
-            batch_index], returns[batch_index], advantages[batch_index]
+        if args.device.type == "cuda":
+            self._model.cuda()
 
-    def _gae(self, states: torch.Tensor, next_states: torch.Tensor,
-             rewards: torch.Tensor,
-             flags: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def act(self, state: torch.Tensor) -> tuple[np.ndarray, torch.Tensor]:
 
         with torch.no_grad():
-            value_next_states = self._model.critic(next_states).squeeze(-1)
-            value_states = self._model.critic(states).squeeze(-1)
+            distribution, critic_value = self.foward(state)
 
-        returns = rewards + self._gamma * value_next_states * (1. - flags)
-        delta = returns - value_states
+        action = distribution.sample()
+        log_prob = distribution.log_prob(action)
 
-        advantages = torch.zeros(rewards.size()).to(torch.device("cuda"))
-        adv = torch.zeros(rewards.size(1)).to(torch.device("cuda"))
+        if self.is_continuous:
+            log_prob = log_prob.sum(-1)
+
+        return action.cpu().numpy(), log_prob, critic_value.squeeze()
+
+    def _evaluate(
+        self, states: torch.Tensor, actions: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        distribution, td_predict = self.foward(states)
+
+        log_prob = distribution.log_prob(actions)
+        dist_entropy = distribution.entropy()
+
+        if self.is_continuous:
+            log_prob = log_prob.sum(-1)
+            dist_entropy = dist_entropy.sum(-1)
+
+        return log_prob, td_predict.squeeze(), dist_entropy
+
+    def _shuffle_batch(self, batch, td_target, advantages):
+
+        states = batch["states"].reshape((-1, ) + self._obversation_space)
+        actions = batch["actions"].reshape((-1, ) + self._action_space)
+        old_log_probs = batch["log_probs"].reshape(-1)
+        td_target = td_target.reshape(-1)
+        advantages = advantages.reshape(-1)
+
+        batch_index = torch.randperm(self._batch_size)
+
+        return states[batch_index], actions[batch_index], old_log_probs[
+            batch_index], td_target[batch_index], advantages[batch_index]
+
+    def _gae(self, batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
+
+        rewards = batch["rewards"]
+        flags = batch["flags"]
+        state_values = batch["state_values"]
+
+        with torch.no_grad():
+            next_state_value = self._model.critic(
+                batch["last_state"]).squeeze(-1)
+
+        advantages = torch.zeros(rewards.size()).to(self._device)
+        adv = torch.zeros(rewards.size(1)).to(self._device)
+
+        terminal = 1. - batch["last_flag"]
 
         for i in reversed(range(rewards.size(0))):
-            adv = self._gamma * self._lmbda * adv * (1. - flags[i]) + delta[i]
+            delta = rewards[
+                i] + self._gamma * next_state_value * terminal - state_values[i]
+            adv = self._gamma * self._lmbda * adv * terminal + delta
             advantages[i] = adv
 
+            next_state_value = state_values[i]
+            terminal = 1. - flags[i]
+
+        td_target = advantages + state_values
         advantages = self._normalize_tensor(advantages)
 
-        td_target = advantages + value_states
+        return td_target.squeeze(), advantages.squeeze()
 
-        return td_target, advantages
+    def update_policy(self, batch: dict, step: int):
 
-    def update_policy(self, minibatch: dict):
+        td_target, advantages = self._gae(batch)
 
-        returns, advantages = self._gae(minibatch["states"],
-                                        minibatch["next_states"],
-                                        minibatch["rewards"],
-                                        minibatch["flags"])
+        states, actions, old_log_probs, td_target, advantages = self._shuffle_batch(
+            batch, td_target, advantages)
 
-        states, actions, old_log_probs, returns, advantages = self.shuffle_batch(
-            minibatch, returns, advantages)
-
-        b_inds = np.arange(2048)
+        clipfracs = []
 
         for _ in range(self.__n_optim):
-            for start in range(0, 128, 2048):
-                end = start + 128
-                mb_inds = b_inds[start:end]
+            for start in range(0, self._batch_size, self._minibatch_size):
+                end = start + self._minibatch_size
+                index = slice(start, end)
 
-                log_probs, dist_entropy, state_values = self._evaluate(
-                    states[mb_inds], actions[mb_inds])
+                log_probs, td_predict, dist_entropy = self._evaluate(
+                    states[index], actions[index])
 
-                ratios = torch.exp(log_probs[mb_inds] - old_log_probs[mb_inds])
+                logratio = log_probs - old_log_probs[index]
+                ratios = logratio.exp()
 
-                surr1 = -advantages[mb_inds] * ratios
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratios - 1) - logratio).mean()
+                    clipfracs += [
+                        ((ratios - 1.0).abs() > 0.2).float().mean().item()
+                    ]
 
-                surr2 = -advantages[mb_inds] * torch.clamp(
+                surr1 = advantages[index] * ratios
+
+                surr2 = advantages[index] * torch.clamp(
                     ratios, 1. - self.__eps_clip, 1. + self.__eps_clip)
 
-                policy_loss = torch.max(surr1, surr2).mean()
+                policy_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = self.__value_constant * mse_loss(
-                    state_values, returns[mb_inds])
+                    td_predict, td_target[index])
 
                 entropy_bonus = self.__entropy_constant * dist_entropy.mean()
 
@@ -107,111 +158,8 @@ class PPO(Base):
                 clip_grad_norm_(self._model.parameters(), 0.5)
                 self._model.optimizer.step()
 
-        self.writer.add_scalar("update/policy_loss", policy_loss,
-                               self.global_step)
-        self.writer.add_scalar("update/value_loss", value_loss,
-                               self.global_step)
-        self.writer.add_scalar("update/loss", loss, self.global_step)
-
-
-class PPODiscrete(PPO):
-
-    def __init__(self, args, obversation_space: tuple, action_space: tuple,
-                 writer):
-
-        super(PPODiscrete, self).__init__(args, obversation_space, (), writer)
-
-        self._model = ActorCriticNet(obversation_space,
-                                     action_space,
-                                     args.learning_rate,
-                                     args.layers,
-                                     args.shared_network,
-                                     is_continuous=False)
-
-        self._model.cuda()
-
-    def _evaluate(
-        self, states: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-        action_values = self._model.actor_discrete(states)
-        state_values = self._model.critic(states).squeeze()
-
-        action_prob = softmax(action_values, dim=-1)
-        action_dist = Categorical(action_prob)
-
-        log_prob = action_dist.log_prob(actions)
-        dist_entropy = action_dist.entropy()
-
-        return log_prob, dist_entropy, state_values
-
-    def act(self, state: torch.Tensor) -> tuple[int, torch.Tensor]:
-
-        with torch.no_grad():
-            actor_value = self._model.actor_discrete(state)
-
-        probs = softmax(actor_value, dim=-1)
-        dist = Categorical(probs)
-
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-
-        self.increment_step()
-
-        return action.cpu().numpy(), log_prob
-
-
-class PPOContinuous(PPO):
-
-    def __init__(self, args, obversation_space: tuple, action_space: tuple,
-                 writer):
-
-        super(PPOContinuous, self).__init__(args, obversation_space,
-                                            action_space, writer)
-
-        # self.bound_interval = torch.Tensor(action_space.high).cuda()
-
-        self._model = ActorCriticNet(obversation_space,
-                                     action_space,
-                                     args.learning_rate,
-                                     args.layers,
-                                     args.shared_network,
-                                     is_continuous=True)
-
-        self._model.cuda()
-
-    def _evaluate(
-        self, states: torch.Tensor, actions: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-        action_values = self._model.actor_continuous(states)
-        state_values = self._model.critic(states).squeeze()
-
-        mean = action_values[0]
-        variance = action_values[1]
-        dist = Normal(mean, variance)
-
-        log_prob = dist.log_prob(actions).sum(-1)
-        dist_entropy = dist.entropy().sum(-1)
-
-        return log_prob, dist_entropy, state_values
-
-    def act(self, state: torch.Tensor) -> tuple[np.ndarray, torch.Tensor]:
-
-        with torch.no_grad():
-            actor_value = self._model.actor_continuous(state)
-
-        mean = actor_value[0]
-        variance = actor_value[1]
-        dist = Normal(mean, variance)
-
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(-1)
-
-        self.writer.add_scalar("rollout/mean", mean.mean(), self.global_step)
-        self.writer.add_scalar("rollout/variance", variance.mean(),
-                               self.global_step)
-
-        self.increment_step()
-
-        return action.cpu().numpy(), log_prob
+        self.writer.add_scalar("update/policy_loss", policy_loss, step)
+        self.writer.add_scalar("update/value_loss", value_loss, step)
+        self.writer.add_scalar("debug/old_approx_kl", old_approx_kl, step)
+        self.writer.add_scalar("debug/approx_kl", approx_kl, step)
+        self.writer.add_scalar("debug/clipfrac", np.mean(clipfracs), step)

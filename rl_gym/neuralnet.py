@@ -1,13 +1,13 @@
 import numpy as np
 import torch
 from torch import optim, nn
+from torch.distributions import Categorical, Normal
 
 
-def layer_init(in_shape, out_shape, std=np.sqrt(2), bias_const=0.0):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
-    layer = nn.Linear(int(in_shape), int(out_shape))
-    nn.init.orthogonal_(layer.weight, std)
-    nn.init.constant_(layer.bias, bias_const)
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
 
@@ -19,9 +19,6 @@ class ActorCriticNet(nn.Module):
 
         super(ActorCriticNet, self).__init__()
 
-        self.actor_neural_net = None
-        self.critic_neural_net = None
-
         current_layer_value = np.array(obversation_space).prod()
         num_actions = np.prod(action_space)
 
@@ -30,17 +27,18 @@ class ActorCriticNet(nn.Module):
 
             for layer_value in list_layer:
                 base_neural_net.append(
-                    layer_init(current_layer_value, layer_value))
+                    layer_init(nn.Linear(current_layer_value, layer_value)))
                 base_neural_net.append(nn.Tanh())
 
                 current_layer_value = layer_value
 
             self.actor_neural_net = nn.Sequential(
                 base_neural_net,
-                layer_init(list_layer[-1], num_actions, std=0.01))
+                layer_init(nn.Linear(list_layer[-1], num_actions), std=0.01))
 
             self.critic_neural_net = nn.Sequential(
-                base_neural_net, layer_init(list_layer[-1], 1, std=1.0))
+                base_neural_net,
+                layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
 
         else:
             self.actor_neural_net = nn.Sequential()
@@ -48,20 +46,20 @@ class ActorCriticNet(nn.Module):
 
             for layer_value in list_layer:
                 self.actor_neural_net.append(
-                    layer_init(current_layer_value, layer_value))
+                    layer_init(nn.Linear(current_layer_value, layer_value)))
                 self.actor_neural_net.append(nn.Tanh())
 
                 self.critic_neural_net.append(
-                    layer_init(current_layer_value, layer_value))
+                    layer_init(nn.Linear(current_layer_value, layer_value)))
                 self.critic_neural_net.append(nn.Tanh())
 
                 current_layer_value = layer_value
 
             self.actor_neural_net.append(
-                layer_init(list_layer[-1], num_actions, std=0.01))
+                layer_init(nn.Linear(list_layer[-1], num_actions), std=0.01))
 
             self.critic_neural_net.append(
-                layer_init(list_layer[-1], 1, std=1.0))
+                layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
 
         if is_continuous:
             self.actor_logstd = nn.Parameter(torch.zeros(1, num_actions))
@@ -71,16 +69,64 @@ class ActorCriticNet(nn.Module):
     def forward(self):
         pass
 
-    def actor_discrete(self, state: torch.Tensor) -> torch.Tensor:
+    def forward_discrete(self, state: torch.Tensor) -> torch.Tensor:
 
-        return self.actor_neural_net(state)
+        actor_value = self.actor_neural_net(state)
+        critic_value = self.critic_neural_net(state)
+        distribution = Categorical(logits=actor_value)
 
-    def actor_continuous(self, state: torch.Tensor) -> torch.Tensor:
+        return distribution, critic_value
+
+    def forward_continuous(
+            self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
         action_mean = self.actor_neural_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
-        return action_mean, action_std
+        distribution = Normal(action_mean, action_std)
+
+        return distribution, self.critic_neural_net(state)
 
     def critic(self, state: torch.Tensor) -> torch.Tensor:
 
         return self.critic_neural_net(state)
+
+
+class CNNActorCritic(nn.Module):
+
+    def __init__(self, action_space: tuple, learning_rate: float):
+
+        super(CNNActorCritic, self).__init__()
+
+        num_actions = np.prod(action_space)
+
+        self.network = nn.Sequential(
+            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
+        )
+        self.actor_neural_net = layer_init(nn.Linear(512, num_actions),
+                                           std=0.01)
+        self.critic_neural_net = layer_init(nn.Linear(512, 1), std=1)
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+    def forward(self):
+        pass
+
+    def forward_discrete(self, state):
+        output = self.network(state / 255.0)
+        actor_value = self.actor_neural_net(output)
+        critic_value = self.critic_neural_net(output)
+
+        distribution = Categorical(logits=actor_value)
+
+        return distribution, critic_value
+
+    def critic(self, state):
+        output = self.network(state / 255.0)
+        return self.critic_neural_net(output)

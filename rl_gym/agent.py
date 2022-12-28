@@ -1,8 +1,8 @@
 import torch
 import gymnasium as gym
 import numpy as np
-from rl_gym.algorithm.ppo import PPOContinuous, PPODiscrete
-from rl_gym.algorithm.a2c import A2CDiscrete, A2CContinuous
+from rl_gym.algorithm.a2c import A2C
+from rl_gym.algorithm.ppo import PPO
 
 
 class Agent:
@@ -13,22 +13,23 @@ class Agent:
         type_algorithm = args.algo.lower()
 
         self.is_continuous = type(action_space).__name__.lower() == "box"
+        self.device = args.device
 
         action_shape = action_space.shape if self.is_continuous else (
             action_space.n, )
 
-        args = [args, obversation_space.shape, action_shape, writer]
+        args = [
+            args, obversation_space.shape, action_shape, writer, self.is_continuous
+        ]
 
         if type_algorithm == "a2c":
-            self.algorithm = A2CContinuous(
-                *args) if self.is_continuous else A2CDiscrete(*args)
+            self.algorithm = A2C(*args)
 
         elif type_algorithm == "a3c":
             raise NotImplementedError()
 
         elif type_algorithm == "ppo":
-            self.algorithm = PPOContinuous(
-                *args) if self.is_continuous else PPODiscrete(*args)
+            self.algorithm = PPO(*args)
 
         elif type_algorithm == "ddpg":
             raise NotImplementedError()
@@ -41,20 +42,16 @@ class Agent:
 
     def get_action(self, state: np.ndarray) -> tuple:
 
-        state_torch = torch.from_numpy(state).float().to(torch.device("cuda"))
+        state_torch = torch.from_numpy(state).to(self.device).float()
         return self.algorithm.act(state_torch)
 
     def get_obs_and_action_shape(self):
 
         return self.algorithm.get_obs_and_action_shape()
 
-    def get_global_step(self):
+    def update_policy(self, batch: dict, step: int):
 
-        return self.algorithm.global_step
-
-    def update_policy(self, minibatch: dict):
-
-        self.algorithm.update_policy(minibatch)
+        self.algorithm.update_policy(batch, step)
 
     def save(self, path: str):
 
