@@ -5,6 +5,6 @@ runs/
 envs/
 
 *.pt
+debug.ipynb
 poetry.lock
-list_env.txt
 render.py
