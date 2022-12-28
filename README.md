@@ -2,18 +2,26 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-# STATUS : WORK IN PROGRESS
+---
 
 The goal of this repository is to implement any RL algorithms and try to benchmarks them in the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.  
-Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
+Made in Python (3.10) with [Pytorch](https://github.com/pytorch/pytorch).
 
-**Policy based:**
+| RL Algorithm            | Discrete | Continuous |
+|-------------------------|:--------:|:----------:|
+| A2C [[1]](#references)  |     X    |      X     |
+| PPO [[2]](#references)  |     X    |      X     |
+| DDPG [[3]](#references) |          |            |
+| TD3 [[4]](#references)  |          |            |
+| SAC [[5]](#references)  |          |            |
 
-- [x] A2C [[1]](#references)
-- [x] PPO [[2]](#references)
-- [ ] DDPG [[3]](#references)
-- [ ] TD3 [[4]](#references)
-- [ ] SAC [[5]](#references)
+| Gymnasium Environments                                                               | Supported |
+|--------------------------------------------------------------------------------------|:---------:|
+| [Classic Control](https://gymnasium.farama.org/environments/classic_control/)        |     X     |
+| [Box2D](https://gymnasium.farama.org/environments/box2d/)                            |     X     |
+| [Toy Text](https://gymnasium.farama.org/environments/toy_text/)                      |     X     |
+| [MuJoCo](https://gymnasium.farama.org/environments/mujoco/)                          |     X     |
+| [Atari](https://gymnasium.farama.org/environments/atari/)                            |     X     |
 ---
 
 ## Setup
