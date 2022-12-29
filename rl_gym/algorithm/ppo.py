@@ -11,9 +11,8 @@ class PPO(Base):
     def __init__(self, args, obversation_space: tuple, action_space: tuple,
                  writer, is_continuous):
 
-        super(PPO,
-              self).__init__(args, obversation_space,
-                             action_space if is_continuous else (), writer)
+        super().__init__(args, obversation_space,
+                         action_space if is_continuous else (), writer)
 
         self.__n_optim = 4
         self.__eps_clip = 0.2

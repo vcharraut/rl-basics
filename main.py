@@ -27,7 +27,7 @@ def make_env(env_id, idx, run_name, capture_video):
         env = gym.wrappers.RecordEpisodeStatistics(env)
 
         if env.spec.entry_point == "shimmy.atari_env:AtariEnv":
-            env = gym.wrappers.AtariPreprocessing(env)
+            env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
             env = gym.wrappers.FrameStack(env, 4)
         else:
             env = gym.wrappers.FlattenObservation(env)

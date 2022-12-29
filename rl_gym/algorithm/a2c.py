@@ -10,9 +10,8 @@ class A2C(Base):
     def __init__(self, args, obversation_space: tuple, action_space: tuple,
                  writer, is_continuous):
 
-        super(A2C,
-              self).__init__(args, obversation_space,
-                             action_space if is_continuous else (), writer)
+        super().__init__(args, obversation_space,
+                         action_space if is_continuous else (), writer)
 
         self.is_continuous = is_continuous
 

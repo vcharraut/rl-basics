@@ -17,7 +17,7 @@ class ActorCriticNet(nn.Module):
                  learning_rate: float, list_layer: list,
                  is_shared_network: bool, is_continuous: bool):
 
-        super(ActorCriticNet, self).__init__()
+        super().__init__()
 
         current_layer_value = np.array(obversation_space).prod()
         num_actions = np.prod(action_space)
@@ -95,7 +95,7 @@ class CNNActorCritic(nn.Module):
 
     def __init__(self, action_space: tuple, learning_rate: float):
 
-        super(CNNActorCritic, self).__init__()
+        super().__init__()
 
         num_actions = np.prod(action_space)
 
@@ -119,7 +119,7 @@ class CNNActorCritic(nn.Module):
         pass
 
     def forward_discrete(self, state):
-        output = self.network(state / 255.0)
+        output = self.network(state)
         actor_value = self.actor_neural_net(output)
         critic_value = self.critic_neural_net(output)
 
@@ -128,5 +128,5 @@ class CNNActorCritic(nn.Module):
         return distribution, critic_value
 
     def critic(self, state):
-        output = self.network(state / 255.0)
+        output = self.network(state)
         return self.critic_neural_net(output)
