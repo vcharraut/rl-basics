@@ -150,6 +150,7 @@ def main():
     actions = np.zeros((args.num_steps, args.num_envs) + action_shape)
     rewards = np.zeros((args.num_steps, args.num_envs))
     flags = np.zeros((args.num_steps, args.num_envs))
+    log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     state_values = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
     num_updates = int(args.total_timesteps // args.num_steps)
@@ -159,7 +160,6 @@ def main():
     next_done = np.zeros(args.num_envs)
 
     for _ in tqdm(range(num_updates)):
-        log_probs = []
         start = time.perf_counter()
 
         for i in range(args.num_steps):
@@ -174,8 +174,8 @@ def main():
             states[i] = state
             actions[i] = action
             rewards[i] = reward
+            log_probs[i] = log_prob
             state_values[i] = state_value
-            log_probs.append(log_prob)
 
             state = next_state
             next_done = np.logical_or(terminated, truncated)
@@ -196,14 +196,14 @@ def main():
             {
                 "states": torch.from_numpy(states).float().to(args.device),
                 "actions": torch.from_numpy(actions).float().to(args.device),
+                "rewards": torch.from_numpy(rewards).float().to(args.device),
+                "flags": torch.from_numpy(flags).float().to(args.device),
+                "state_values": state_values,
+                "log_probs": log_probs,
                 "last_state": torch.from_numpy(next_state).float().to(
                     args.device),
                 "last_flag": torch.from_numpy(next_done).float().to(
                     args.device),
-                "rewards": torch.from_numpy(rewards).float().to(args.device),
-                "flags": torch.from_numpy(flags).float().to(args.device),
-                "state_values": state_values,
-                "log_probs": torch.stack(log_probs).squeeze()
             }, global_step)
 
         end = time.perf_counter()
