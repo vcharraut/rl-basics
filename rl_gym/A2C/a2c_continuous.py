@@ -39,7 +39,7 @@ def make_env(env_id, idx, run_name, capture_video):
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"runs/{run_name}/videos/",
+                video_folder=f"../runs/{run_name}/videos/",
                 disable_logger=True)
         return env
 
@@ -203,7 +203,7 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = f"{args.env}__a2c__{date}"
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(f"../runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" %

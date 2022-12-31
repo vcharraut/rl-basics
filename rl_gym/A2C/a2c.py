@@ -38,7 +38,7 @@ def make_env(env_id, idx, run_name, capture_video):
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"runs/{run_name}/videos/",
+                video_folder=f"../runs/{run_name}/videos/",
                 disable_logger=True)
         return env
 
