@@ -41,13 +41,13 @@ def make_env(env_id, idx, run_name, capture_video):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="LunarLander-v2")
+    parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
     parser.add_argument("--total-timesteps", type=int, default=int(1e6))
-    parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument("--num-envs", type=int, default=4)
     parser.add_argument("--num-steps", type=int, default=2048)
     parser.add_argument("--num-minibatches", type=int, default=32)
     parser.add_argument("--num-updates", type=int, default=10)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
@@ -81,7 +81,7 @@ class Agent(nn.Module):
 
         super().__init__()
 
-        num_actions = np.prod(action_shape)
+        num_actions = action_shape.n
 
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(4, 32, 8, stride=4)),
