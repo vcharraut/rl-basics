@@ -37,7 +37,7 @@ def parse_args():
     _args.device = torch.device(
         "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
     _args.batch_size = int(_args.num_envs * _args.num_steps)
-    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
+    _args.num_updates = int(_args.total_timesteps // _args.num_steps)
 
     return _args
 
@@ -68,7 +68,7 @@ def make_env(env_id, idx, run_name, capture_video):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -101,7 +101,7 @@ class Agent(nn.Module):
 
             self.critic_neural_net = nn.Sequential(
                 base_neural_net,
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
         else:
             self.actor_neural_net = nn.Sequential()
@@ -123,7 +123,7 @@ class Agent(nn.Module):
                            std=0.01))
 
             self.critic_neural_net.append(
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -169,6 +169,7 @@ def main():
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
+    # Create vectorized environment(s)
     envs = gym.vector.SyncVectorEnv([
         make_env(args.env, i, run_name, args.capture_video)
         for i in range(args.num_envs)
@@ -189,15 +190,14 @@ def main():
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
-    num_updates = int(args.total_timesteps // args.num_steps)
-    global_step = 0
-
     if args.seed > 0:
         state, _ = envs.reset(seed=args.seed)
     else:
         state, _ = envs.reset()
 
-    for _ in tqdm(range(num_updates)):
+    global_step = 0
+
+    for _ in tqdm(range(args.num_updates)):
         start = time.perf_counter()
 
         # Generate transitions
@@ -247,24 +247,25 @@ def main():
         td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
         td_target = td_target.squeeze()
 
+        # Flatten batch
+        _states = states.flatten(0, 1)
+        _actions = actions.flatten(0, 1)
+        _td_target = td_target.reshape(-1)
+
         # Shuffle batch
-        b_states = states.flatten(0, 1)
-        b_actions = actions.flatten(0, 1)
-        b_td_target = td_target.reshape(-1)
+        batch_indexes = torch.randperm(args.batch_size)
 
-        batch_index = torch.randperm(args.batch_size)
-
-        b_states = b_states[batch_index]
-        b_ations = b_actions[batch_index]
-        b_td_target = b_td_target[batch_index]
+        _states = _states[batch_indexes]
+        _actions = _actions[batch_indexes]
+        _td_target = _td_target[batch_indexes]
 
         # Update policy
-        log_probs, td_predict = agent.get_logprob_value(b_states, b_ations)
+        log_probs, td_predict = agent.get_logprob_value(_states, _actions)
 
-        advantages = b_td_target - td_predict
+        advantages = _td_target - td_predict
 
         policy_loss = (-log_probs * advantages).mean()
-        value_loss = mse_loss(td_target, td_predict)
+        value_loss = mse_loss(_td_target, td_predict)
 
         loss = policy_loss + value_loss
 

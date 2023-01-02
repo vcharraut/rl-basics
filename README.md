@@ -39,15 +39,6 @@ poetry install
 
 ## Run
 
-```
-poetry run python main.py
-```
-or
-```
-poetry shell
-python main.py
-```
-
 ---
 
 ## Results

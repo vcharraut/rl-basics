@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=2048)
     parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-updates", type=int, default=10)
+    parser.add_argument("--num-optims", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -44,6 +44,7 @@ def parse_args():
         "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
     _args.batch_size = int(_args.num_envs * _args.num_steps)
     _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
+    _args.num_updates = int(_args.total_timesteps // _args.num_steps)
 
     return _args
 
@@ -75,7 +76,7 @@ def make_env(env_id, idx, run_name, capture_video):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -108,7 +109,7 @@ class Agent(nn.Module):
 
             self.critic_neural_net = nn.Sequential(
                 base_neural_net,
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
         else:
             self.actor_neural_net = nn.Sequential()
@@ -130,7 +131,7 @@ class Agent(nn.Module):
                            std=0.01))
 
             self.critic_neural_net.append(
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -180,6 +181,7 @@ def main():
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
+    # Create vectorized environment(s)
     envs = gym.vector.SyncVectorEnv([
         make_env(args.env, i, run_name, args.capture_video)
         for i in range(args.num_envs)
@@ -202,16 +204,20 @@ def main():
     log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     state_values = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
-    num_updates = int(args.total_timesteps // args.num_steps)
-    global_step = 0
-
     if args.seed > 0:
         state, _ = envs.reset(seed=args.seed)
     else:
         state, _ = envs.reset()
 
-    for _ in tqdm(range(num_updates)):
+    global_step = 0
+
+    for update in tqdm(range(args.num_updates)):
         start = time.perf_counter()
+
+        # Annealing learning rate
+        frac = 1. - (update - 1.) / args.num_updates
+        new_lr = frac * args.learning_rate
+        agent.optimizer.param_groups[0]["lr"] = new_lr
 
         # Generate transitions
         for i in range(args.num_steps):
@@ -275,52 +281,50 @@ def main():
                                                          1e-7)
         advantages = advantages.squeeze()
 
-        # Shuffle batch
-        b_states = states.flatten(0, 1)
-        b_actions = actions.flatten(0, 1)
-        b_log_probs = log_probs.reshape(-1)
-        b_td_target = td_target.reshape(-1)
-        b_advantages = advantages.reshape(-1)
+        # Flatten batch
+        _states = states.flatten(0, 1)
+        _actions = actions.flatten(0, 1)
+        _log_probs = log_probs.reshape(-1)
+        _td_target = td_target.reshape(-1)
+        _advantages = advantages.reshape(-1)
 
-        batch_index = torch.randperm(args.batch_size)
+        batch_indexes = np.arange(args.batch_size)
 
-        b_states = b_states[batch_index]
-        b_actions = b_actions[batch_index]
-        b_log_probs = b_log_probs[batch_index]
-        b_td_target = b_td_target[batch_index]
-        b_advantages = b_advantages[batch_index]
-
-        # Update policy
         clipfracs = []
 
-        for _ in range(args.num_updates):
+        # Update policy
+        for _ in range(args.num_optims):
+
+            # Shuffle batch
+            np.random.shuffle(batch_indexes)
+
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
-                index = slice(start, end)
+                index = batch_indexes[start:end]
 
                 _, new_log_probs, td_predict, dist_entropy = agent.get_action_value(
-                    b_states[index], b_actions[index])
+                    _states[index], _actions[index])
 
-                logratio = new_log_probs - b_log_probs[index]
+                logratio = new_log_probs - _log_probs[index]
                 ratios = logratio.exp()
 
                 with torch.no_grad():
-                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    # Calculate approx_kl http://joschu.net/blog/kl-approx.html
                     old_approx_kl = (-logratio).mean()
                     approx_kl = ((ratios - 1) - logratio).mean()
                     clipfracs += [
-                        ((ratios - 1.0).abs() > 0.2).float().mean().item()
+                        ((ratios - 1.).abs() > 0.2).float().mean().item()
                     ]
 
-                surr1 = b_advantages[index] * ratios
+                surr1 = _advantages[index] * ratios
 
-                surr2 = b_advantages[index] * torch.clamp(
+                surr2 = _advantages[index] * torch.clamp(
                     ratios, 1. - args.eps_clip, 1. + args.eps_clip)
 
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = args.value_factor * mse_loss(
-                    td_predict, b_td_target[index])
+                    td_predict, _td_target[index])
 
                 entropy_bonus = args.entropy_factor * dist_entropy.mean()
 
