@@ -15,10 +15,7 @@ torch = "1.13.1"
 tensorboard = "^2.11.0"
 gymnasium = {extras = ["all"], version = "^0.27.0"}
 
-
 [tool.poetry.group.dev.dependencies]
-ipykernel = "^6.17.1"
-ipywidgets = "^8.0.2"
 yapf = "^0.32.0"
 toml = "^0.10.2"
 
