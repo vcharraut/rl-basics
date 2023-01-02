@@ -1,5 +1,6 @@
 import argparse
 import time
+import random
 from datetime import datetime
 from warnings import simplefilter
 
@@ -16,8 +17,6 @@ from torch.utils.tensorboard.writer import SummaryWriter
 
 simplefilter(action="ignore", category=DeprecationWarning)
 
-SEED = 24
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -26,7 +25,7 @@ def parse_args():
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=2048)
     parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-updates", type=int, default=10)
+    parser.add_argument("--num-updates", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -37,6 +36,7 @@ def parse_args():
     parser.add_argument("--shared-network", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture-video", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
 
     _args = parser.parse_args()
 
@@ -67,7 +67,7 @@ def make_env(env_id, idx, run_name, capture_video):
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"../runs/{run_name}/videos/",
+                video_folder=f"runs/{run_name}/videos/",
                 disable_logger=True)
         return env
 
@@ -164,15 +164,17 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = f"{args.env}__ppo__{date}"
-    writer = SummaryWriter(f"../runs/{run_name}")
+    writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" %
         ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
+    if args.seed > 0:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
 
     envs = gym.vector.SyncVectorEnv([
         make_env(args.env, i, run_name, args.capture_video)
@@ -199,7 +201,10 @@ def main():
     num_updates = int(args.total_timesteps // args.num_steps)
     global_step = 0
 
-    state, _ = envs.reset(seed=SEED)
+    if args.seed > 0:
+        state, _ = envs.reset(seed=args.seed)
+    else:
+        state, _ = envs.reset()
 
     for _ in tqdm(range(num_updates)):
         start = time.perf_counter()
@@ -245,7 +250,7 @@ def main():
         # Compute values
         with torch.no_grad():
             state_torch = torch.from_numpy(state).to(args.device).float()
-            next_state_value = agent.critic(state_torch).squeeze(-1)
+            next_state_value = agent.get_value(state_torch).squeeze(-1)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
