@@ -3,40 +3,20 @@ import time
 from datetime import datetime
 from warnings import simplefilter
 
+import gymnasium as gym
+import numpy as np
+from tqdm import tqdm
+
 import torch
 from torch import optim, nn
 from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.distributions import Categorical
 from torch.utils.tensorboard.writer import SummaryWriter
-import gymnasium as gym
-import numpy as np
-from tqdm import tqdm
 
 simplefilter(action="ignore", category=DeprecationWarning)
 
 SEED = 24
-
-
-def make_env(env_id, idx, run_name, capture_video):
-
-    def thunk():
-
-        if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
-        env = gym.wrappers.FrameStack(env, 4)
-        if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(
-                env=env,
-                video_folder=f"../runs/{run_name}/videos/",
-                disable_logger=True)
-        return env
-
-    return thunk
 
 
 def parse_args():
@@ -68,6 +48,27 @@ def parse_args():
     return _args
 
 
+def make_env(env_id, idx, run_name, capture_video):
+
+    def thunk():
+
+        if capture_video:
+            env = gym.make(env_id, render_mode="rgb_array")
+        else:
+            env = gym.make(env_id)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
+        env = gym.wrappers.FrameStack(env, 4)
+        if capture_video and idx == 0:
+            env = gym.wrappers.RecordVideo(
+                env=env,
+                video_folder=f"../runs/{run_name}/videos/",
+                disable_logger=True)
+        return env
+
+    return thunk
+
+
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -77,11 +78,11 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class Agent(nn.Module):
 
-    def __init__(self, args, action_shape: tuple):
+    def __init__(self, args, action_space):
 
         super().__init__()
 
-        num_actions = action_shape.n
+        num_actions = action_space.n
 
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(4, 32, 8, stride=4)),
@@ -103,7 +104,10 @@ class Agent(nn.Module):
         if args.device.type == "cuda":
             self.cuda()
 
-    def forward(self, state: torch.Tensor, action=None) -> torch.Tensor:
+    def forward(self):
+        pass
+
+    def get_action_value(self, state, action=None):
 
         output = self.network(state)
         actor_value = self.actor_neural_net(output)
@@ -115,12 +119,11 @@ class Agent(nn.Module):
         log_prob = distribution.log_prob(action)
         dist_entropy = distribution.entropy()
 
-        critic_value = self.critic_neural_net(output)
+        critic_value = self.critic_neural_net(output).squeeze()
 
-        return action.cpu().numpy(), log_prob, critic_value.squeeze(
-        ), dist_entropy
+        return action.cpu().numpy(), log_prob, critic_value, dist_entropy
 
-    def critic(self, state):
+    def get_value(self, state):
         output = self.network(state)
         return self.critic_neural_net(output)
 
@@ -175,7 +178,8 @@ def main():
 
             with torch.no_grad():
                 state_torch = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = agent(state_torch)
+                action, log_prob, state_value, _ = agent.get_action_value(
+                    state_torch)
 
             next_state, reward, terminated, truncated, infos = envs.step(
                 action)
@@ -227,7 +231,7 @@ def main():
 
         td_target = (advantages + state_values).squeeze()
         advantages = (advantages - advantages.mean()) / (advantages.std() +
-                                                         1e-8)
+                                                         1e-7)
         advantages = advantages.squeeze()
 
         # Shuffle batch
@@ -240,20 +244,21 @@ def main():
         batch_index = torch.randperm(args.batch_size)
 
         b_states = b_states[batch_index]
-        b_ations = b_actions[batch_index]
+        b_actions = b_actions[batch_index]
         b_log_probs = b_log_probs[batch_index]
         b_td_target = b_td_target[batch_index]
         b_advantages = b_advantages[batch_index]
 
         # Update policy
         clipfracs = []
+
         for _ in range(args.num_updates):
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
                 index = slice(start, end)
 
-                _, new_log_probs, td_predict, dist_entropy = agent(
-                    b_states[index], b_ations[index])
+                _, new_log_probs, td_predict, dist_entropy = agent.get_action_value(
+                    b_states[index], b_actions[index])
 
                 logratio = new_log_probs - b_log_probs[index]
                 ratios = logratio.exp()

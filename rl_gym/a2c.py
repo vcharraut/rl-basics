@@ -3,6 +3,10 @@ import time
 from datetime import datetime
 from warnings import simplefilter
 
+import gymnasium as gym
+import numpy as np
+from tqdm import tqdm
+
 import torch
 from torch import optim, nn
 from torch.nn.functional import mse_loss
@@ -10,13 +14,32 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.distributions import Categorical
 from torch.utils.tensorboard.writer import SummaryWriter
 
-import gymnasium as gym
-import numpy as np
-from tqdm import tqdm
-
 simplefilter(action="ignore", category=DeprecationWarning)
 
 SEED = 24
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", type=str, default="LunarLander-v2")
+    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
+    parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument("--num-steps", type=int, default=2048)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--shared-network", action="store_true")
+    parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--capture-video", action="store_true")
+
+    _args = parser.parse_args()
+
+    _args.device = torch.device(
+        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.batch_size = int(_args.num_envs * _args.num_steps)
+    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
+
+    return _args
 
 
 def make_env(env_id, idx, run_name, capture_video):
@@ -45,68 +68,6 @@ def make_env(env_id, idx, run_name, capture_video):
     return thunk
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env",
-                        type=str,
-                        default="LunarLander-v2",
-                        help="name of the environment")
-    parser.add_argument("--total-timesteps",
-                        type=int,
-                        default=int(1e6),
-                        help="number of episodes to run")
-    parser.add_argument("--num-envs",
-                        type=int,
-                        default=1,
-                        help="number of parallel game environments")
-    parser.add_argument(
-        "--num-steps",
-        type=int,
-        default=2048,
-        help="number of steps to run in each environment per rollout")
-    parser.add_argument("--num-minibatches",
-                        type=int,
-                        default=32,
-                        help="the number of mini-batches")
-    parser.add_argument("--learning-rate",
-                        type=float,
-                        default=1e-3,
-                        help="learning rate of the optimizer")
-    parser.add_argument("--gamma",
-                        type=float,
-                        default=0.99,
-                        help="the discount factor gamma")
-    parser.add_argument('--list-layer',
-                        nargs="+",
-                        type=int,
-                        default=[64, 64],
-                        help="list of the layers for the neural network")
-    parser.add_argument(
-        "--shared-network",
-        action="store_true",
-        help="if toggled, actor and critic will share the same network",
-    )
-    parser.add_argument(
-        "--cpu",
-        action="store_true",
-        help="if toggled, the model will run on CPU",
-    )
-    parser.add_argument(
-        "--capture-video",
-        action="store_true",
-        help="if toggled, videos will be recorded",
-    )
-
-    _args = parser.parse_args()
-
-    _args.device = torch.device(
-        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
-    _args.batch_size = int(_args.num_envs * _args.num_steps)
-    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
-
-    return _args
-
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -116,12 +77,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class Agent(nn.Module):
 
-    def __init__(self, args, obversation_shape: tuple, action_shape: tuple):
+    def __init__(self, args, obversation_space, action_space):
 
         super().__init__()
 
-        current_layer_value = np.array(obversation_shape.shape).prod()
-        num_actions = action_shape.n
+        current_layer_value = np.array(obversation_space.shape).prod()
+        num_actions = action_space.n
 
         if args.shared_network:
             base_neural_net = nn.Sequential()
@@ -180,15 +141,15 @@ class Agent(nn.Module):
 
         return action.cpu().numpy()
 
-    def log_prob_critic(self, state, action):
+    def get_logprob_value(self, state, action):
 
         actor_value = self.actor_neural_net(state)
         distribution = Categorical(logits=actor_value)
         log_prob = distribution.log_prob(action)
 
-        critic_value = self.critic_neural_net(state)
+        critic_value = self.critic_neural_net(state).squeeze()
 
-        return log_prob, critic_value.squeeze()
+        return log_prob, critic_value
 
 
 def main():
@@ -196,7 +157,7 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = f"{args.env}__a2c__{date}"
-    writer = SummaryWriter(f"/runs/{run_name}")
+    writer = SummaryWriter(f"../runs/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" %
@@ -216,8 +177,8 @@ def main():
 
     agent = Agent(args, obversation_space, action_space)
 
-    obversation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.shape
+    obversation_shape = obversation_space.shape
+    action_shape = action_space.shape
 
     states = torch.zeros((args.num_steps, args.num_envs) +
                          obversation_shape).to(args.device)
@@ -234,6 +195,7 @@ def main():
     for _ in tqdm(range(num_updates)):
         start = time.perf_counter()
 
+        # Generate transitions
         for i in range(args.num_steps):
             global_step += 1
 
@@ -277,7 +239,7 @@ def main():
             gain = rewards[i] + gain * args.gamma * terminal
             td_target[i] = gain
 
-        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-8)
+        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
         td_target = td_target.squeeze()
 
         # Shuffle batch
@@ -292,7 +254,7 @@ def main():
         b_td_target = b_td_target[batch_index]
 
         # Update policy
-        log_probs, td_predict = agent.log_prob_critic(b_states, b_ations)
+        log_probs, td_predict = agent.get_logprob_value(b_states, b_ations)
 
         advantages = b_td_target - td_predict
 

@@ -3,19 +3,49 @@ import time
 from datetime import datetime
 from warnings import simplefilter
 
+import gymnasium as gym
+import numpy as np
+from tqdm import tqdm
+
 import torch
 from torch import optim, nn
 from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.distributions import Normal
 from torch.utils.tensorboard.writer import SummaryWriter
-import gymnasium as gym
-import numpy as np
-from tqdm import tqdm
 
 simplefilter(action="ignore", category=DeprecationWarning)
 
 SEED = 24
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
+    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
+    parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument("--num-steps", type=int, default=2048)
+    parser.add_argument("--num-minibatches", type=int, default=32)
+    parser.add_argument("--num-updates", type=int, default=10)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--gae", type=float, default=0.95)
+    parser.add_argument("--eps-clip", type=float, default=0.2)
+    parser.add_argument("--value-factor", type=float, default=0.5)
+    parser.add_argument("--entropy-factor", type=float, default=0.01)
+    parser.add_argument("--shared-network", action="store_true")
+    parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--capture-video", action="store_true")
+
+    _args = parser.parse_args()
+
+    _args.device = torch.device(
+        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.batch_size = int(_args.num_envs * _args.num_steps)
+    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
+
+    return _args
 
 
 def make_env(env_id, idx, run_name, capture_video):
@@ -45,34 +75,6 @@ def make_env(env_id, idx, run_name, capture_video):
     return thunk
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
-    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
-    parser.add_argument("--num-envs", type=int, default=1)
-    parser.add_argument("--num-steps", type=int, default=2048)
-    parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-updates", type=int, default=10)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--gae", type=float, default=0.95)
-    parser.add_argument("--eps-clip", type=float, default=0.2)
-    parser.add_argument("--value-factor", type=float, default=0.5)
-    parser.add_argument("--entropy-factor", type=float, default=0.01)
-    parser.add_argument("--shared-network", action="store_true")
-    parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--capture-video", action="store_true")
-    _args = parser.parse_args()
-
-    _args.device = torch.device(
-        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
-    _args.batch_size = int(_args.num_envs * _args.num_steps)
-    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
-
-    return _args
-
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -82,12 +84,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class Agent(nn.Module):
 
-    def __init__(self, args, obversation_shape, action_shape):
+    def __init__(self, args, obversation_space, action_space):
 
         super().__init__()
 
-        current_layer_value = np.array(obversation_shape.shape).prod()
-        num_actions = np.array(action_shape.shape).prod()
+        current_layer_value = np.array(obversation_space.shape).prod()
+        num_actions = np.array(action_space.shape).prod()
 
         if args.shared_network:
             base_neural_net = nn.Sequential()
@@ -137,7 +139,10 @@ class Agent(nn.Module):
         if args.device.type == "cuda":
             self.cuda()
 
-    def forward(self, state, action=None):
+    def forward(self):
+        pass
+
+    def get_action_value(self, state, action=None):
 
         action_mean = self.actor_neural_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
@@ -149,12 +154,11 @@ class Agent(nn.Module):
         log_prob = distribution.log_prob(action).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)
 
-        critic_value = self.critic_neural_net(state)
+        critic_value = self.critic_neural_net(state).squeeze()
 
-        return action.cpu().numpy(), log_prob, critic_value.squeeze(
-        ), dist_entropy
+        return action.cpu().numpy(), log_prob, critic_value, dist_entropy
 
-    def critic(self, state):
+    def get_value(self, state):
 
         return self.critic_neural_net(state)
 
@@ -184,8 +188,8 @@ def main():
 
     agent = Agent(args, obversation_space, action_space)
 
-    obversation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.shape
+    obversation_shape = obversation_space.shape
+    action_shape = action_space.shape
 
     states = torch.zeros((args.num_steps, args.num_envs) +
                          obversation_shape).to(args.device)
@@ -210,7 +214,8 @@ def main():
 
             with torch.no_grad():
                 state_torch = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = agent(state_torch)
+                action, log_prob, state_value, _ = agent.get_action_value(
+                    state_torch)
 
             next_state, reward, terminated, truncated, infos = envs.step(
                 action)
@@ -255,14 +260,15 @@ def main():
             returns = rewards[i] + args.gamma * next_state_value * terminal
             delta = returns - state_values[i]
 
-            adv = args.gamma * 0.95 * adv * terminal + delta
+            adv = args.gamma * args.gae * adv * terminal + delta
             advantages[i] = adv
 
             next_state_value = state_values[i]
 
         td_target = (advantages + state_values).squeeze()
         advantages = (advantages - advantages.mean()) / (advantages.std() +
-                                                         1e-8).squeeze()
+                                                         1e-7)
+        advantages = advantages.squeeze()
 
         # Shuffle batch
         b_states = states.flatten(0, 1)
@@ -274,7 +280,7 @@ def main():
         batch_index = torch.randperm(args.batch_size)
 
         b_states = b_states[batch_index]
-        b_ations = b_actions[batch_index]
+        b_actions = b_actions[batch_index]
         b_log_probs = b_log_probs[batch_index]
         b_td_target = b_td_target[batch_index]
         b_advantages = b_advantages[batch_index]
@@ -287,8 +293,8 @@ def main():
                 end = start + args.minibatch_size
                 index = slice(start, end)
 
-                _, new_log_probs, td_predict, dist_entropy = agent(
-                    b_states[index], b_ations[index])
+                _, new_log_probs, td_predict, dist_entropy = agent.get_action_value(
+                    b_states[index], b_actions[index])
 
                 logratio = new_log_probs - b_log_probs[index]
                 ratios = logratio.exp()
