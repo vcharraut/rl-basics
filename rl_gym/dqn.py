@@ -177,7 +177,8 @@ def main():
 
             # Choice between exploration or intensification
             if np.random.rand() < eps_threshold:
-                action = torch.tensor([env.single_action_space.sample()])
+                action = torch.tensor([env.single_action_space.sample()
+                                       ]).to(args.device)
             else:
                 q_values = policy_net(state)
                 action = torch.argmax(q_values, dim=1)

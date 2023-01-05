@@ -76,7 +76,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
     return layer
 
 
-class Agent(nn.Module):
+class ActorCriticNet(nn.Module):
 
     def __init__(self, args, obversation_space, action_space):
 
@@ -185,7 +185,7 @@ def main():
     obversation_space = envs.single_observation_space
     action_space = envs.single_action_space
 
-    agent = Agent(args, obversation_space, action_space)
+    policy_net = ActorCriticNet(args, obversation_space, action_space)
 
     obversation_shape = obversation_space.shape
     action_shape = action_space.shape
@@ -213,7 +213,7 @@ def main():
 
             with torch.no_grad():
                 state_torch = torch.from_numpy(state).to(args.device).float()
-                action = agent.get_action(state_torch)
+                action = policy_net.get_action(state_torch)
 
             next_state, reward, terminated, truncated, infos = envs.step(
                 action)
@@ -267,7 +267,7 @@ def main():
         _td_target = _td_target[batch_indexes]
 
         # Update policy
-        log_probs, td_predict = agent.get_logprob_value(_states, _actions)
+        log_probs, td_predict = policy_net.get_logprob_value(_states, _actions)
 
         advantages = _td_target - td_predict
 
@@ -276,10 +276,10 @@ def main():
 
         loss = policy_loss + value_loss
 
-        agent.optimizer.zero_grad()
+        policy_net.optimizer.zero_grad()
         loss.backward()
-        clip_grad_norm_(agent.parameters(), 0.5)
-        agent.optimizer.step()
+        clip_grad_norm_(policy_net.parameters(), 0.5)
+        policy_net.optimizer.step()
 
         writer.add_scalar("update/policy_loss", policy_loss, global_step)
         writer.add_scalar("update/value_loss", value_loss, global_step)

@@ -82,7 +82,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
     return layer
 
 
-class Agent(nn.Module):
+class ActorCriticNet(nn.Module):
 
     def __init__(self, args, obversation_space, action_space):
 
@@ -186,7 +186,7 @@ def main():
     obversation_space = envs.single_observation_space
     action_space = envs.single_action_space
 
-    agent = Agent(args, obversation_space, action_space)
+    policy_net = ActorCriticNet(args, obversation_space, action_space)
 
     obversation_shape = obversation_space.shape
     action_shape = action_space.shape
@@ -213,7 +213,7 @@ def main():
         # Annealing learning rate
         frac = 1. - (update - 1.) / args.num_updates
         new_lr = frac * args.learning_rate
-        agent.optimizer.param_groups[0]["lr"] = new_lr
+        policy_net.optimizer.param_groups[0]["lr"] = new_lr
 
         # Generate transitions
         for i in range(args.num_steps):
@@ -221,7 +221,7 @@ def main():
 
             with torch.no_grad():
                 state_torch = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = agent.get_action_value(
+                action, log_prob, state_value, _ = policy_net.get_action_value(
                     state_torch)
 
             next_state, reward, terminated, truncated, infos = envs.step(
@@ -256,7 +256,7 @@ def main():
         # Compute values
         with torch.no_grad():
             state_torch = torch.from_numpy(state).to(args.device).float()
-            next_state_value = agent.get_value(state_torch).squeeze(-1)
+            next_state_value = policy_net.get_value(state_torch).squeeze(-1)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
@@ -298,7 +298,7 @@ def main():
                 end = start + args.minibatch_size
                 index = batch_indexes[start:end]
 
-                _, new_log_probs, td_predict, dist_entropy = agent.get_action_value(
+                _, new_log_probs, td_predict, dist_entropy = policy_net.get_action_value(
                     _states[index], _actions[index])
 
                 logratio = new_log_probs - _log_probs[index]
@@ -326,10 +326,10 @@ def main():
 
                 loss = policy_loss + value_loss - entropy_bonus
 
-                agent.optimizer.zero_grad()
+                policy_net.optimizer.zero_grad()
                 loss.backward()
-                clip_grad_norm_(agent.parameters(), 0.5)
-                agent.optimizer.step()
+                clip_grad_norm_(policy_net.parameters(), 0.5)
+                policy_net.optimizer.step()
 
         writer.add_scalar("update/policy_loss", policy_loss, global_step)
         writer.add_scalar("update/value_loss", value_loss, global_step)
