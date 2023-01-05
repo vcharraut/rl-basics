@@ -1,10 +1,8 @@
-__pycache__/
 .vscode/
 .venv/
 runs/
-envs/
 
 *.pt
-debug.ipynb
+debug.py
 poetry.lock
 render.py
