@@ -96,9 +96,8 @@ class ActorCriticNet(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
-        self.actor_neural_net = layer_init(nn.Linear(512, num_actions),
-                                           std=0.01)
-        self.critic_neural_net = layer_init(nn.Linear(512, 1), std=1)
+        self.actor_net = layer_init(nn.Linear(512, num_actions), std=0.01)
+        self.critic_net = layer_init(nn.Linear(512, 1), std=1)
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -111,7 +110,7 @@ class ActorCriticNet(nn.Module):
     def get_action_value(self, state, action=None):
 
         output = self.network(state)
-        actor_value = self.actor_neural_net(output)
+        actor_value = self.actor_net(output)
         distribution = Categorical(logits=actor_value)
 
         if action is None:
@@ -120,13 +119,13 @@ class ActorCriticNet(nn.Module):
         log_prob = distribution.log_prob(action)
         dist_entropy = distribution.entropy()
 
-        critic_value = self.critic_neural_net(output).squeeze()
+        critic_value = self.critic_net(output).squeeze()
 
         return action.cpu().numpy(), log_prob, critic_value, dist_entropy
 
     def get_value(self, state):
         output = self.network(state)
-        return self.critic_neural_net(output)
+        return self.critic_net(output)
 
 
 def main():

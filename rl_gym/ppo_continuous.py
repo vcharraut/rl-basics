@@ -34,7 +34,6 @@ def parse_args():
     parser.add_argument("--eps-clip", type=float, default=0.2)
     parser.add_argument("--value-factor", type=float, default=0.5)
     parser.add_argument("--entropy-factor", type=float, default=0.01)
-    parser.add_argument("--shared-network", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -92,46 +91,25 @@ class ActorCriticNet(nn.Module):
         current_layer_value = np.array(obversation_space.shape).prod()
         num_actions = np.array(action_space.shape).prod()
 
-        if args.shared_network:
-            base_neural_net = nn.Sequential()
+        self.actor_net = nn.Sequential()
+        self.critic_net = nn.Sequential()
 
-            for layer_value in args.list_layer:
-                base_neural_net.append(
-                    layer_init(nn.Linear(current_layer_value, layer_value)))
-                base_neural_net.append(nn.Tanh())
+        for layer_value in args.list_layer:
+            self.actor_net.append(
+                layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.actor_net.append(nn.Tanh())
 
-                current_layer_value = layer_value
+            self.critic_net.append(
+                layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.critic_net.append(nn.Tanh())
 
-            self.actor_neural_net = nn.Sequential(
-                base_neural_net,
-                layer_init(nn.Linear(args.list_layer[-1], num_actions),
-                           std=0.01))
+            current_layer_value = layer_value
 
-            self.critic_neural_net = nn.Sequential(
-                base_neural_net,
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
+        self.actor_net.append(
+            layer_init(nn.Linear(args.list_layer[-1], num_actions), std=0.01))
 
-        else:
-            self.actor_neural_net = nn.Sequential()
-            self.critic_neural_net = nn.Sequential()
-
-            for layer_value in args.list_layer:
-                self.actor_neural_net.append(
-                    layer_init(nn.Linear(current_layer_value, layer_value)))
-                self.actor_neural_net.append(nn.Tanh())
-
-                self.critic_neural_net.append(
-                    layer_init(nn.Linear(current_layer_value, layer_value)))
-                self.critic_neural_net.append(nn.Tanh())
-
-                current_layer_value = layer_value
-
-            self.actor_neural_net.append(
-                layer_init(nn.Linear(args.list_layer[-1], num_actions),
-                           std=0.01))
-
-            self.critic_neural_net.append(
-                layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
+        self.critic_net.append(
+            layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -145,7 +123,7 @@ class ActorCriticNet(nn.Module):
 
     def get_action_value(self, state, action=None):
 
-        action_mean = self.actor_neural_net(state)
+        action_mean = self.actor_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
         distribution = Normal(action_mean, action_std)
 
@@ -155,13 +133,13 @@ class ActorCriticNet(nn.Module):
         log_prob = distribution.log_prob(action).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)
 
-        critic_value = self.critic_neural_net(state).squeeze()
+        critic_value = self.critic_net(state).squeeze()
 
         return action.cpu().numpy(), log_prob, critic_value, dist_entropy
 
     def get_value(self, state):
 
-        return self.critic_neural_net(state)
+        return self.critic_net(state)
 
 
 def main():
