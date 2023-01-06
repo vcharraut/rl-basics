@@ -3,6 +3,7 @@ import time
 import random
 from datetime import datetime
 from warnings import simplefilter
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -49,7 +50,7 @@ def parse_args():
     return _args
 
 
-def make_env(env_id, idx, run_name, capture_video):
+def make_env(env_id, idx, run_dir, capture_video):
 
     def thunk():
 
@@ -66,10 +67,9 @@ def make_env(env_id, idx, run_name, capture_video):
         env = gym.wrappers.TransformReward(
             env, lambda reward: np.clip(reward, -10, 10))
         if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(
-                env=env,
-                video_folder=f"runs/{run_name}/videos/",
-                disable_logger=True)
+            env = gym.wrappers.RecordVideo(env=env,
+                                           video_folder=f"{run_dir}/videos/",
+                                           disable_logger=True)
         return env
 
     return thunk
@@ -164,8 +164,10 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = f"{args.env}__ppo__{date}"
-    writer = SummaryWriter(f"runs/{run_name}")
+    run_dir = Path(
+        Path(__file__).parent.resolve().parent, "runs",
+        f"{args.env}__ppo__{date}")
+    writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" %
@@ -179,7 +181,7 @@ def main():
 
     # Create vectorized environment(s)
     envs = gym.vector.SyncVectorEnv([
-        make_env(args.env, i, run_name, args.capture_video)
+        make_env(args.env, i, run_dir, args.capture_video)
         for i in range(args.num_envs)
     ])
 
