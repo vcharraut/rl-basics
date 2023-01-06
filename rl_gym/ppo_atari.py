@@ -1,20 +1,19 @@
 import argparse
-import time
 import random
+import time
 from datetime import datetime
-from warnings import simplefilter
 from pathlib import Path
+from warnings import simplefilter
 
 import gymnasium as gym
 import numpy as np
-from tqdm import tqdm
-
 import torch
-from torch import optim, nn
+from torch import nn, optim
+from torch.distributions import Categorical
 from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
-from torch.distributions import Categorical
 from torch.utils.tensorboard.writer import SummaryWriter
+from tqdm import tqdm
 
 simplefilter(action="ignore", category=DeprecationWarning)
 
