@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture-video", action="store_true")
@@ -32,8 +32,7 @@ def parse_args():
 
     _args = parser.parse_args()
 
-    _args.device = torch.device(
-        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.device = torch.device("cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
     _args.batch_size = int(_args.num_envs * _args.num_steps)
     _args.num_updates = int(_args.total_timesteps // _args.num_steps)
 
@@ -41,7 +40,6 @@ def parse_args():
 
 
 def make_env(env_id, idx, run_dir, capture_video):
-
     def thunk():
 
         if capture_video:
@@ -52,21 +50,19 @@ def make_env(env_id, idx, run_dir, capture_video):
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(
-            env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env, gamma=0.99)
-        env = gym.wrappers.TransformReward(
-            env, lambda reward: np.clip(reward, -10, 10))
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(env=env,
-                                           video_folder=f"{run_dir}/videos/",
-                                           disable_logger=True)
+            env = gym.wrappers.RecordVideo(
+                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
+            )
         return env
 
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -74,7 +70,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
 
 class ActorCriticNet(nn.Module):
-
     def __init__(self, args, obversation_shape, action_shape):
 
         super().__init__()
@@ -86,21 +81,17 @@ class ActorCriticNet(nn.Module):
         self.critic_net = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.actor_net.append(
-                layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.actor_net.append(layer_init(nn.Linear(current_layer_value, layer_value)))
             self.actor_net.append(nn.Tanh())
 
-            self.critic_net.append(
-                layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.critic_net.append(layer_init(nn.Linear(current_layer_value, layer_value)))
             self.critic_net.append(nn.Tanh())
 
             current_layer_value = layer_value
 
-        self.actor_net.append(
-            layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
+        self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
 
-        self.critic_net.append(
-            layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
+        self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
 
         self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
 
@@ -139,14 +130,12 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(
-        Path(__file__).parent.resolve().parent, "runs",
-        f"{args.env}__a2c__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__a2c__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" %
-        ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s"
+        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Seeding
@@ -156,10 +145,9 @@ def main():
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env, i, run_dir, args.capture_video)
-        for i in range(args.num_envs)
-    ])
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(args.env, i, run_dir, args.capture_video) for i in range(args.num_envs)]
+    )
 
     obversation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.shape
@@ -167,10 +155,8 @@ def main():
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
 
     # Initialize batch variables
-    states = torch.zeros((args.num_steps, args.num_envs) +
-                         obversation_shape).to(args.device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape).to(
-        args.device)
+    states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape).to(args.device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
@@ -188,14 +174,12 @@ def main():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
                 action = policy_net.get_action(state_tensor)
 
-            next_state, reward, terminated, truncated, infos = envs.step(
-                action)
+            next_state, reward, terminated, truncated, infos = envs.step(action)
 
             states[i] = state_tensor
             actions[i] = torch.from_numpy(action).to(args.device)
             rewards[i] = torch.from_numpy(reward).to(args.device)
-            flags[i] = torch.from_numpy(np.logical_or(
-                terminated, truncated)).to(args.device)
+            flags[i] = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device)
 
             state = next_state
 
@@ -207,17 +191,15 @@ def main():
                 if info is None:
                     continue
 
-                writer.add_scalar("rollout/episodic_return",
-                                  info["episode"]["r"], global_step)
-                writer.add_scalar("rollout/episodic_length",
-                                  info["episode"]["l"], global_step)
+                writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
+                writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
 
         # Compute values
         td_target = torch.zeros(rewards.size()).to(args.device)
         gain = torch.zeros(rewards.size(1)).to(args.device)
 
         for i in reversed(range(td_target.size(0))):
-            terminal = 1. - flags[i]
+            terminal = 1.0 - flags[i]
             gain = rewards[i] + gain * args.gamma * terminal
             td_target[i] = gain
 
@@ -259,5 +241,5 @@ def main():
     writer.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

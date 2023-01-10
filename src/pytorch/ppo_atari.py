@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--num-minibatches", type=int, default=4)
     parser.add_argument("--num-optims", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
     parser.add_argument("--eps-clip", type=float, default=0.2)
@@ -38,8 +38,7 @@ def parse_args():
 
     _args = parser.parse_args()
 
-    _args.device = torch.device(
-        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.device = torch.device("cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
     _args.batch_size = int(_args.num_envs * _args.num_steps)
     _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
     _args.num_updates = int(_args.total_timesteps // _args.num_steps)
@@ -48,7 +47,6 @@ def parse_args():
 
 
 def make_env(env_id, idx, run_dir, capture_video):
-
     def thunk():
 
         if capture_video:
@@ -59,15 +57,15 @@ def make_env(env_id, idx, run_dir, capture_video):
         env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
         env = gym.wrappers.FrameStack(env, 4)
         if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(env=env,
-                                           video_folder=f"{run_dir}/videos/",
-                                           disable_logger=True)
+            env = gym.wrappers.RecordVideo(
+                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
+            )
         return env
 
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.):
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -75,7 +73,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
 
 class ActorCriticNet(nn.Module):
-
     def __init__(self, args, action_shape):
 
         super().__init__()
@@ -97,8 +94,8 @@ class ActorCriticNet(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
         self.scheduler = optim.lr_scheduler.LambdaLR(
-            self.optimizer,
-            lr_lambda=lambda epoch: 1. - (epoch - 1.) / args.num_updates)
+            self.optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
+        )
 
         if args.device.type == "cuda":
             self.cuda()
@@ -131,14 +128,12 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(
-        Path(__file__).parent.resolve().parent, "runs",
-        f"{args.env}__ppo__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__ppo__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" %
-        ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s"
+        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Seeding
@@ -148,10 +143,9 @@ def main():
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env, i, run_dir, args.capture_video)
-        for i in range(args.num_envs)
-    ])
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(args.env, i, run_dir, args.capture_video) for i in range(args.num_envs)]
+    )
 
     obversation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
@@ -159,8 +153,7 @@ def main():
     policy_net = ActorCriticNet(args, action_shape)
 
     # Initialize batch variables
-    states = torch.zeros((args.num_steps, args.num_envs) +
-                         obversation_shape).to(args.device)
+    states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
     actions = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
@@ -179,19 +172,16 @@ def main():
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = policy_net.get_action_value(
-                    state_tensor)
+                action, log_prob, state_value, _ = policy_net.get_action_value(state_tensor)
 
-            next_state, reward, terminated, truncated, infos = envs.step(
-                action)
+            next_state, reward, terminated, truncated, infos = envs.step(action)
 
             states[i] = state_tensor
             actions[i] = torch.from_numpy(action).to(args.device)
             rewards[i] = torch.from_numpy(reward).to(args.device)
             log_probs[i] = log_prob
             state_values[i] = state_value
-            flags[i] = torch.from_numpy(np.logical_or(
-                terminated, truncated)).to(args.device)
+            flags[i] = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device)
 
             state = next_state
 
@@ -203,23 +193,19 @@ def main():
                 if info is None:
                     continue
 
-                writer.add_scalar("rollout/episodic_return",
-                                  info["episode"]["r"], global_step)
-                writer.add_scalar("rollout/episodic_length",
-                                  info["episode"]["l"], global_step)
+                writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
+                writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
 
         # Compute values with GAE
         with torch.no_grad():
-            next_state_tensor = torch.from_numpy(next_state).to(
-                args.device).float()
-            next_state_value = policy_net.get_value(next_state_tensor).squeeze(
-                -1)
+            next_state_tensor = torch.from_numpy(next_state).to(args.device).float()
+            next_state_value = policy_net.get_value(next_state_tensor).squeeze(-1)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
 
         for i in reversed(range(rewards.size(0))):
-            terminal = 1. - flags[i]
+            terminal = 1.0 - flags[i]
 
             returns = rewards[i] + args.gamma * next_state_value * terminal
             delta = returns - state_values[i]
@@ -230,8 +216,7 @@ def main():
             next_state_value = state_values[i]
 
         td_target = (advantages + state_values).squeeze()
-        advantages = (advantages - advantages.mean()) / (advantages.std() +
-                                                         1e-7)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
         advantages = advantages.squeeze()
 
         # Flatten batch
@@ -256,7 +241,8 @@ def main():
                 index = batch_indexes[start:end]
 
                 _, new_log_probs, td_predict, dist_entropy = policy_net.get_action_value(
-                    _states[index], _actions[index])
+                    _states[index], _actions[index]
+                )
 
                 logratio = new_log_probs - _log_probs[index]
                 ratios = logratio.exp()
@@ -265,19 +251,17 @@ def main():
                     # Calculate approx_kl http://joschu.net/blog/kl-approx.html
                     old_approx_kl = (-logratio).mean()
                     approx_kl = ((ratios - 1) - logratio).mean()
-                    clipfracs += [
-                        ((ratios - 1.).abs() > 0.2).float().mean().item()
-                    ]
+                    clipfracs += [((ratios - 1.0).abs() > 0.2).float().mean().item()]
 
                 surr1 = _advantages[index] * ratios
 
                 surr2 = _advantages[index] * torch.clamp(
-                    ratios, 1. - args.eps_clip, 1. + args.eps_clip)
+                    ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip
+                )
 
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = args.value_factor * mse_loss(
-                    td_predict, _td_target[index])
+                value_loss = args.value_factor * mse_loss(td_predict, _td_target[index])
 
                 entropy_bonus = args.entropy_factor * dist_entropy.mean()
 
@@ -302,5 +286,5 @@ def main():
     writer.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

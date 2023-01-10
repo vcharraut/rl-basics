@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--buffer-size", type=int, default=int(1e5))
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--exploration-noise", type=float, default=0.1)
@@ -35,40 +35,35 @@ def parse_args():
 
     _args = parser.parse_args()
 
-    _args.device = torch.device(
-        "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.device = torch.device("cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
 
     return _args
 
 
 def make_env(env_id, run_dir, capture_video):
-
     def thunk():
 
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env=env,
-                                           video_folder=f"{run_dir}/videos/",
-                                           disable_logger=True)
+            env = gym.wrappers.RecordVideo(
+                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
+            )
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(
-            env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env, gamma=0.99)
-        env = gym.wrappers.TransformReward(
-            env, lambda reward: np.clip(reward, -10, 10))
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
     return thunk
 
 
-class ReplayMemory():
-
+class ReplayMemory:
     def __init__(self, buffer_size, batch_size, obversation_shape, device):
         self.buffer = deque(maxlen=buffer_size)
         self.batch_size = batch_size
@@ -76,16 +71,14 @@ class ReplayMemory():
         self.device = device
 
         self.transition = namedtuple(
-            "Transition",
-            field_names=["state", "action", "reward", "next_state", "flag"])
+            "Transition", field_names=["state", "action", "reward", "next_state", "flag"]
+        )
 
     def push(self, state, action, reward, next_state, flag):
-        self.buffer.append(
-            self.transition(state, action, reward, next_state, flag))
+        self.buffer.append(self.transition(state, action, reward, next_state, flag))
 
     def sample(self):
-        batch = self.transition(*zip(
-            *random.sample(self.buffer, self.batch_size)))
+        batch = self.transition(*zip(*random.sample(self.buffer, self.batch_size)))
 
         states = torch.cat(batch.state).to(self.device)
         actions = torch.cat(batch.action).to(self.device)
@@ -97,21 +90,22 @@ class ReplayMemory():
 
 
 class ActorNet(nn.Module):
-
-    def __init__(self, args, obversation_shape, action_shape, action_low,
-                 action_high):
+    def __init__(self, args, obversation_shape, action_shape, action_low, action_high):
         super().__init__()
 
         obversation_shape = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
-        self.network = nn.Sequential(nn.Linear(obversation_shape, 256),
-                                     nn.ReLU(), nn.Linear(256, 256), nn.ReLU(),
-                                     nn.Linear(256, action_shape))
+        self.network = nn.Sequential(
+            nn.Linear(obversation_shape, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_shape),
+        )
 
         # action rescaling
-        self.register_buffer("action_scale",
-                             ((action_high - action_low) / 2.0))
+        self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
         self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
@@ -125,15 +119,18 @@ class ActorNet(nn.Module):
 
 
 class CriticNet(nn.Module):
-
     def __init__(self, args, obversation_shape, action_shape):
         super().__init__()
 
         input_shape = np.prod(obversation_shape) + np.prod(action_shape)
 
-        self.network = nn.Sequential(nn.Linear(input_shape, 256), nn.ReLU(),
-                                     nn.Linear(256, 256), nn.ReLU(),
-                                     nn.Linear(256, 1))
+        self.network = nn.Sequential(
+            nn.Linear(input_shape, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -149,14 +146,12 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(
-        Path(__file__).parent.resolve().parent, "runs",
-        f"{args.env}__ddpg__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__ddpg__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" %
-        ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s"
+        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Seeding
@@ -166,27 +161,22 @@ def main():
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    env = gym.vector.SyncVectorEnv(
-        [make_env(args.env, run_dir, args.capture_video)])
+    env = gym.vector.SyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
 
     obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.shape
     action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
-    action_high = torch.from_numpy(env.single_action_space.high).to(
-        args.device)
+    action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
 
-    actor = ActorNet(args, obversation_shape, action_shape, action_low,
-                     action_high)
-    target_actor = ActorNet(args, obversation_shape, action_shape, action_low,
-                            action_high)
+    actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
+    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic = CriticNet(args, obversation_shape, action_shape)
     critic_target = CriticNet(args, obversation_shape, action_shape)
 
     target_actor.load_state_dict(actor.state_dict())
     critic_target.load_state_dict(critic.state_dict())
 
-    replay_memory = ReplayMemory(args.buffer_size, args.batch_size,
-                                 obversation_shape, args.device)
+    replay_memory = ReplayMemory(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
 
@@ -200,17 +190,14 @@ def main():
         else:
             with torch.no_grad():
                 action = actor(state)
-                action += torch.normal(
-                    0, actor.action_scale * args.exploration_noise)
+                action += torch.normal(0, actor.action_scale * args.exploration_noise)
                 action = torch.clamp(action, action_low, action_high)
 
-        next_state, reward, terminated, truncated, infos = env.step(
-            action.cpu().numpy())
+        next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
 
         next_state = torch.from_numpy(next_state).to(args.device).float()
         reward = torch.from_numpy(reward).to(args.device).float()
-        flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(
-            args.device).float()
+        flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device).float()
 
         replay_memory.push(state, action, reward, next_state, flag)
 
@@ -218,24 +205,19 @@ def main():
 
         if "final_info" in infos:
             info = infos["final_info"][0]
-            writer.add_scalar("rollout/episodic_return", info["episode"]["r"],
-                              global_step)
-            writer.add_scalar("rollout/episodic_length", info["episode"]["l"],
-                              global_step)
+            writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
+            writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
 
         # Update policy
         if global_step > args.learning_start:
-            states, actions, rewards, next_states, flags = replay_memory.sample(
-            )
+            states, actions, rewards, next_states, flags = replay_memory.sample()
 
             # Update critic
             with torch.no_grad():
                 next_state_actions = target_actor(next_states)
-                critic_next_target = critic_target(
-                    next_states, next_state_actions).squeeze()
+                critic_next_target = critic_target(next_states, next_state_actions).squeeze()
 
-            td_target = rewards + (1. -
-                                   flags) * args.gamma * critic_next_target
+            td_target = rewards + (1.0 - flags) * args.gamma * critic_next_target
 
             td_predict = critic(states, actions).squeeze()
 
@@ -253,18 +235,18 @@ def main():
                 actor.optimizer.step()
 
                 # Update the target network
-                for param, target_param in zip(actor.parameters(),
-                                               target_actor.parameters()):
-                    target_param.data.copy_(args.tau * param.data +
-                                            (1 - args.tau) * target_param.data)
-                for param, target_param in zip(critic.parameters(),
-                                               critic_target.parameters()):
-                    target_param.data.copy_(args.tau * param.data +
-                                            (1 - args.tau) * target_param.data)
+                for param, target_param in zip(actor.parameters(), target_actor.parameters()):
+                    target_param.data.copy_(
+                        args.tau * param.data + (1 - args.tau) * target_param.data
+                    )
+                for param, target_param in zip(critic.parameters(), critic_target.parameters()):
+                    target_param.data.copy_(
+                        args.tau * param.data + (1 - args.tau) * target_param.data
+                    )
 
     env.close()
     writer.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -16,8 +16,7 @@ tensorboard = "^2.11.0"
 gymnasium = {extras = ["all"], version = "^0.27.0"}
 
 [tool.poetry.group.dev.dependencies]
-yapf = "^0.32.0"
-toml = "^0.10.2"
+black = "^22.12.0"
 
 [tool.poetry.group.atari.dependencies]
 autorom = {extras = ["accept-rom-license"], version = "^0.5.0"}
@@ -27,6 +26,9 @@ optional = true
 
 [tool.poetry.group.profile.dependencies]
 snakeviz = "^2.1.1"
+
+[tool.black]
+line-length = 100
 
 [build-system]
 requires = ["poetry-core"]
