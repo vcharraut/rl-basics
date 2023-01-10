@@ -102,7 +102,7 @@ class ActorNet(nn.Module):
                  action_high):
         super().__init__()
 
-        obversation_shape = np.array(obversation_shape).prod()
+        obversation_shape = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
         self.network = nn.Sequential(nn.Linear(obversation_shape, 256),
@@ -129,8 +129,7 @@ class CriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
         super().__init__()
 
-        input_shape = np.array(obversation_shape).prod() + np.prod(
-            action_shape)
+        input_shape = np.prod(obversation_shape) + np.prod(action_shape)
 
         self.network = nn.Sequential(nn.Linear(input_shape, 256), nn.ReLU(),
                                      nn.Linear(256, 256), nn.ReLU(),
@@ -203,7 +202,7 @@ def main():
                 action = actor(state)
                 action += torch.normal(
                     0, actor.action_scale * args.exploration_noise)
-                # action = torch.clamp(action, action_low, action_high)
+                action = torch.clamp(action, action_low, action_high)
 
         next_state, reward, terminated, truncated, infos = env.step(
             action.cpu().numpy())

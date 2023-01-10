@@ -1,6 +1,5 @@
 import argparse
 import random
-import time
 from datetime import datetime
 from pathlib import Path
 from warnings import simplefilter
@@ -20,7 +19,7 @@ simplefilter(action="ignore", category=DeprecationWarning)
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="LunarLanderContinuous-v2")
+    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
     parser.add_argument("--total-timesteps", type=int, default=int(1e6))
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=2048)
@@ -76,12 +75,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
 class ActorCriticNet(nn.Module):
 
-    def __init__(self, args, obversation_space, action_space):
+    def __init__(self, args, obversation_shape, action_shape):
 
         super().__init__()
 
-        current_layer_value = np.array(obversation_space.shape).prod()
-        num_actions = np.array(action_space.shape).prod()
+        current_layer_value = np.prod(obversation_shape)
+        action_shape = np.prod(action_shape)
 
         self.actor_net = nn.Sequential()
         self.critic_net = nn.Sequential()
@@ -98,12 +97,12 @@ class ActorCriticNet(nn.Module):
             current_layer_value = layer_value
 
         self.actor_net.append(
-            layer_init(nn.Linear(args.list_layer[-1], num_actions), std=0.01))
+            layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
 
         self.critic_net.append(
             layer_init(nn.Linear(args.list_layer[-1], 1), std=1.))
 
-        self.actor_logstd = nn.Parameter(torch.zeros(1, num_actions))
+        self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -142,7 +141,7 @@ def main():
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(
         Path(__file__).parent.resolve().parent, "runs",
-        f"{args.env}__ppo__{date}")
+        f"{args.env}__a2c__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -150,25 +149,24 @@ def main():
         ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    # Seeding
     if args.seed > 0:
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    envs = gym.vector.SyncVectorEnv([
+    envs = gym.vector.AsyncVectorEnv([
         make_env(args.env, i, run_dir, args.capture_video)
         for i in range(args.num_envs)
     ])
 
-    obversation_space = envs.single_observation_space
-    action_space = envs.single_action_space
+    obversation_shape = envs.single_observation_space.shape
+    action_shape = envs.single_action_space.shape
 
-    policy_net = ActorCriticNet(args, obversation_space, action_space)
+    policy_net = ActorCriticNet(args, obversation_shape, action_shape)
 
-    obversation_shape = obversation_space.shape
-    action_shape = action_space.shape
-
+    # Initialize batch variables
     states = torch.zeros((args.num_steps, args.num_envs) +
                          obversation_shape).to(args.device)
     actions = torch.zeros((args.num_steps, args.num_envs) + action_shape).to(
@@ -176,39 +174,35 @@ def main():
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
-    if args.seed > 0:
-        state, _ = envs.reset(seed=args.seed)
-    else:
-        state, _ = envs.reset()
+    state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
 
     for _ in tqdm(range(args.num_updates)):
-        start = time.perf_counter()
 
         # Generate transitions
         for i in range(args.num_steps):
             global_step += 1
 
             with torch.no_grad():
-                state_torch = torch.from_numpy(state).to(args.device).float()
-                action = policy_net.get_action(state_torch)
+                state_tensor = torch.from_numpy(state).to(args.device).float()
+                action = policy_net.get_action(state_tensor)
 
             next_state, reward, terminated, truncated, infos = envs.step(
                 action)
 
-            states[i] = state_torch
+            states[i] = state_tensor
             actions[i] = torch.from_numpy(action).to(args.device)
             rewards[i] = torch.from_numpy(reward).to(args.device)
-
-            done = np.logical_or(terminated, truncated)
-            flags[i] = torch.from_numpy(done).to(args.device)
+            flags[i] = torch.from_numpy(np.logical_or(
+                terminated, truncated)).to(args.device)
 
             state = next_state
 
             if "final_info" not in infos:
                 continue
 
+            # Log episode metrics on Tensorboard
             for info in infos["final_info"]:
                 if info is None:
                     continue
@@ -217,9 +211,6 @@ def main():
                                   info["episode"]["r"], global_step)
                 writer.add_scalar("rollout/episodic_length",
                                   info["episode"]["l"], global_step)
-
-        end = time.perf_counter()
-        writer.add_scalar("rollout/time", end - start, global_step)
 
         # Compute values
         td_target = torch.zeros(rewards.size()).to(args.device)
@@ -260,6 +251,7 @@ def main():
         clip_grad_norm_(policy_net.parameters(), 0.5)
         policy_net.optimizer.step()
 
+        # Log metrics on Tensorboard
         writer.add_scalar("update/policy_loss", policy_loss, global_step)
         writer.add_scalar("update/value_loss", value_loss, global_step)
 

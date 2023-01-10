@@ -1,6 +1,5 @@
 import argparse
 import random
-import time
 from datetime import datetime
 from pathlib import Path
 from warnings import simplefilter
@@ -21,11 +20,11 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
-    parser.add_argument("--num-envs", type=int, default=4)
-    parser.add_argument("--num-steps", type=int, default=2048)
-    parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-optims", type=int, default=10)
+    parser.add_argument("--total-timesteps", type=int, default=10000000)
+    parser.add_argument("--num-envs", type=int, default=8)
+    parser.add_argument("--num-steps", type=int, default=128)
+    parser.add_argument("--num-minibatches", type=int, default=4)
+    parser.add_argument("--num-optims", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -33,7 +32,6 @@ def parse_args():
     parser.add_argument("--eps-clip", type=float, default=0.2)
     parser.add_argument("--value-factor", type=float, default=0.5)
     parser.add_argument("--entropy-factor", type=float, default=0.01)
-    parser.add_argument("--shared-network", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -78,11 +76,9 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.):
 
 class ActorCriticNet(nn.Module):
 
-    def __init__(self, args, action_space):
+    def __init__(self, args, action_shape):
 
         super().__init__()
-
-        num_actions = action_space.n
 
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(4, 32, 8, stride=4)),
@@ -95,10 +91,14 @@ class ActorCriticNet(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
-        self.actor_net = layer_init(nn.Linear(512, num_actions), std=0.01)
+        self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
         self.critic_net = layer_init(nn.Linear(512, 1), std=1)
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
+
+        self.scheduler = optim.lr_scheduler.LambdaLR(
+            self.optimizer,
+            lr_lambda=lambda epoch: 1. - (epoch - 1.) / args.num_updates)
 
         if args.device.type == "cuda":
             self.cuda()
@@ -141,74 +141,64 @@ def main():
         ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    # Seeding
     if args.seed > 0:
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    envs = gym.vector.SyncVectorEnv([
+    envs = gym.vector.AsyncVectorEnv([
         make_env(args.env, i, run_dir, args.capture_video)
         for i in range(args.num_envs)
     ])
 
-    action_space = envs.single_action_space
-
-    policy_net = ActorCriticNet(args, action_space)
-
     obversation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.shape
+    action_shape = envs.single_action_space.n
 
+    policy_net = ActorCriticNet(args, action_shape)
+
+    # Initialize batch variables
     states = torch.zeros((args.num_steps, args.num_envs) +
                          obversation_shape).to(args.device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape).to(
-        args.device)
+    actions = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     state_values = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
-    if args.seed > 0:
-        state, _ = envs.reset(seed=args.seed)
-    else:
-        state, _ = envs.reset()
+    state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
 
-    for update in tqdm(range(args.num_updates)):
-        start = time.perf_counter()
-
-        # Annealing learning rate
-        frac = 1. - (update - 1.) / args.num_updates
-        new_lr = frac * args.learning_rate
-        policy_net.optimizer.param_groups[0]["lr"] = new_lr
+    for _ in tqdm(range(args.num_updates)):
 
         # Generate transitions
         for i in range(args.num_steps):
             global_step += 1
 
             with torch.no_grad():
-                state_torch = torch.from_numpy(state).to(args.device).float()
+                state_tensor = torch.from_numpy(state).to(args.device).float()
                 action, log_prob, state_value, _ = policy_net.get_action_value(
-                    state_torch)
+                    state_tensor)
 
             next_state, reward, terminated, truncated, infos = envs.step(
                 action)
 
-            states[i] = state_torch
+            states[i] = state_tensor
             actions[i] = torch.from_numpy(action).to(args.device)
             rewards[i] = torch.from_numpy(reward).to(args.device)
             log_probs[i] = log_prob
             state_values[i] = state_value
-
-            done = np.logical_or(terminated, truncated)
-            flags[i] = torch.from_numpy(done).to(args.device)
+            flags[i] = torch.from_numpy(np.logical_or(
+                terminated, truncated)).to(args.device)
 
             state = next_state
 
             if "final_info" not in infos:
                 continue
 
+            # Log episode metrics on Tensorboard
             for info in infos["final_info"]:
                 if info is None:
                     continue
@@ -218,13 +208,12 @@ def main():
                 writer.add_scalar("rollout/episodic_length",
                                   info["episode"]["l"], global_step)
 
-        end = time.perf_counter()
-        writer.add_scalar("rollout/time", end - start, global_step)
-
-        # Compute values
+        # Compute values with GAE
         with torch.no_grad():
-            state_torch = torch.from_numpy(state).to(args.device).float()
-            next_state_value = policy_net.get_value(state_torch).squeeze(-1)
+            next_state_tensor = torch.from_numpy(next_state).to(
+                args.device).float()
+            next_state_value = policy_net.get_value(next_state_tensor).squeeze(
+                -1)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
@@ -299,6 +288,10 @@ def main():
                 clip_grad_norm_(policy_net.parameters(), 0.5)
                 policy_net.optimizer.step()
 
+        # Annealing learning rate
+        policy_net.scheduler.step()
+
+        # Log metrics on Tensorboard
         writer.add_scalar("update/policy_loss", policy_loss, global_step)
         writer.add_scalar("update/value_loss", value_loss, global_step)
         writer.add_scalar("debug/old_approx_kl", old_approx_kl, global_step)

@@ -23,13 +23,12 @@ def parse_args():
     parser.add_argument("--total-timesteps", type=int, default=500000)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--buffer-size", type=int, default=10000)
-    parser.add_argument("--learning-rate", type=float, default=2.5e-4)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--tau", type=float, default=5e-3)
     parser.add_argument("--eps-end", type=float, default=0.05)
     parser.add_argument("--eps-start", type=int, default=1)
-    parser.add_argument("--eps-decay", type=int, default=50000)
-    parser.add_argument("--target_network_frequency", type=int, default=500)
     parser.add_argument("--learning-start", type=int, default=10000)
     parser.add_argument("--train-frequency", type=int, default=10)
     parser.add_argument("--cpu", action="store_true")
@@ -40,6 +39,7 @@ def parse_args():
 
     _args.device = torch.device(
         "cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
+    _args.eps_decay = int(_args.total_timesteps * 0.15)
 
     return _args
 
@@ -100,12 +100,11 @@ class ReplayMemory():
 
 class QNetwork(nn.Module):
 
-    def __init__(self, args, obversation_space, action_space):
+    def __init__(self, args, obversation_shape, action_shape):
 
         super().__init__()
 
-        current_layer_value = np.array(obversation_space.shape).prod()
-        num_actions = action_space.n
+        current_layer_value = np.prod(obversation_shape)
 
         self.network = nn.Sequential()
 
@@ -114,7 +113,7 @@ class QNetwork(nn.Module):
             self.network.append(nn.ReLU())
             current_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, num_actions))
+        self.network.append(nn.Linear(current_layer_value, action_shape))
 
         self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
@@ -125,13 +124,18 @@ class QNetwork(nn.Module):
         return self.network(state)
 
 
+def get_exploration_prob(args, step):
+    return args.eps_end + (args.eps_start - args.eps_end) * math.exp(
+        -1. * step / args.eps_decay)
+
+
 def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(
         Path(__file__).parent.resolve().parent, "runs",
-        f"{args.env}__ppo__{date}")
+        f"{args.env}__dqn__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -139,29 +143,27 @@ def main():
         ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    # Seeding
     if args.seed > 0:
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    env = gym.vector.SyncVectorEnv(
+    env = gym.vector.AsyncVectorEnv(
         [make_env(args.env, run_dir, args.capture_video)])
 
-    obversation_space = env.single_observation_space
-    action_space = env.single_action_space
+    obversation_shape = env.single_observation_space.shape
+    action_shape = env.single_action_space.n
 
-    policy_net = QNetwork(args, obversation_space, action_space)
-    target_net = QNetwork(args, obversation_space, action_space)
+    policy_net = QNetwork(args, obversation_shape, action_shape)
+    target_net = QNetwork(args, obversation_shape, action_shape)
     target_net.load_state_dict(policy_net.state_dict())
 
     replay_memory = ReplayMemory(args.buffer_size, args.batch_size,
-                                 obversation_space.shape, args.device)
+                                 obversation_shape, args.device)
 
-    if args.seed > 0:
-        state, _ = env.reset(seed=args.seed)
-    else:
-        state, _ = env.reset()
+    state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
 
     state = torch.from_numpy(state).to(args.device).float()
 
@@ -169,30 +171,28 @@ def main():
 
         # Generate transitions
         with torch.no_grad():
-            eps_threshold = args.eps_end + (
-                args.eps_start - args.eps_end) * math.exp(
-                    -1. * global_step / args.eps_decay)
+            exploration_prob = get_exploration_prob(args, global_step)
 
-            writer.add_scalar("rollout/eps_threshold", eps_threshold,
+            # Log metrics on Tensorboard
+            writer.add_scalar("rollout/eps_threshold", exploration_prob,
                               global_step)
 
             # Choice between exploration or intensification
-            if np.random.rand() < eps_threshold:
+            if np.random.rand() < exploration_prob:
                 action = torch.tensor([env.single_action_space.sample()
                                        ]).to(args.device)
             else:
-                q_values = policy_net(state)
-                action = torch.argmax(q_values, dim=1)
+                action = torch.argmax(policy_net(state), dim=1)
 
         next_state, reward, terminated, truncated, infos = env.step(
             action.cpu().numpy())
 
-        done = torch.from_numpy(np.logical_or(terminated, truncated)).to(
-            args.device).float()
-        reward = torch.from_numpy(reward).to(args.device).float()
         next_state = torch.from_numpy(next_state).to(args.device).float()
+        reward = torch.from_numpy(reward).to(args.device).float()
+        flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(
+            args.device).float()
 
-        replay_memory.push(state, action, reward, next_state, done)
+        replay_memory.push(state, action, reward, next_state, flag)
 
         state = next_state
 
@@ -209,33 +209,33 @@ def main():
                 states, actions, rewards, next_states, flags = replay_memory.sample(
                 )
 
-                # Q values predicted by the model
                 td_predict = policy_net(states).gather(1, actions).squeeze()
 
                 with torch.no_grad():
-                    # Expected Q values are estimated from actions
-                    # which gives maximum Q value
                     action_by_qvalue = policy_net(next_states).argmax(
                         1).unsqueeze(-1)
                     max_q_target = target_net(next_states).gather(
                         1, action_by_qvalue).squeeze()
 
-                # Apply Bellman equation
                 td_target = rewards + (1. - flags) * args.gamma * max_q_target
 
-                # Loss is measured from error between current and newly
-                # expected Q values
                 loss = mse_loss(td_predict, td_target)
 
-                # Backpropagation of loss to NN
                 policy_net.optimizer.zero_grad()
                 loss.backward()
                 policy_net.optimizer.step()
 
-                writer.add_scalar("update/loss", loss, global_step)
+                # Update target network
+                target_net_dict = dict(target_net.state_dict())
+                policy_net_dict = dict(policy_net.state_dict())
 
-                if global_step % args.target_network_frequency == 0:
-                    target_net.load_state_dict(policy_net.state_dict())
+                for key, value in policy_net_dict.items():
+                    target_net_dict[key] = value * args.tau + target_net_dict[
+                        key] * (1. - args.tau)
+                target_net.load_state_dict(target_net_dict)
+
+                # Log metrics on Tensorboard
+                writer.add_scalar("update/loss", loss, global_step)
 
     env.close()
     writer.close()
