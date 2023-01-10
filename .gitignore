@@ -5,4 +5,3 @@ runs/
 *.pt
 debug.py
 poetry.lock
-render.py
