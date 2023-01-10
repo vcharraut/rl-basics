@@ -18,10 +18,10 @@ simplefilter(action="ignore", category=DeprecationWarning)
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="LunarLanderContinuous-v2")
-    parser.add_argument("--total-timesteps", type=int, default=int(3e5))
+    parser.add_argument("--env", type=str, default="Humanoid-v4")
+    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--buffer-size", type=int, default=int(5e4))
+    parser.add_argument("--buffer-size", type=int, default=int(1e5))
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument('--list-layer', nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
