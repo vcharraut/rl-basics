@@ -63,7 +63,7 @@ def make_env(env_id, run_dir, capture_video):
     return thunk
 
 
-class ReplayMemory:
+class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, obversation_shape, device):
         self.buffer = deque(maxlen=buffer_size)
         self.batch_size = batch_size
@@ -176,7 +176,7 @@ def main():
     target_actor.load_state_dict(actor.state_dict())
     critic_target.load_state_dict(critic.state_dict())
 
-    replay_memory = ReplayMemory(args.buffer_size, args.batch_size, obversation_shape, args.device)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
 
@@ -199,7 +199,7 @@ def main():
         reward = torch.from_numpy(reward).to(args.device).float()
         flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device).float()
 
-        replay_memory.push(state, action, reward, next_state, flag)
+        replay_buffer.push(state, action, reward, next_state, flag)
 
         state = next_state
 
@@ -210,7 +210,7 @@ def main():
 
         # Update policy
         if global_step > args.learning_start:
-            states, actions, rewards, next_states, flags = replay_memory.sample()
+            states, actions, rewards, next_states, flags = replay_buffer.sample()
 
             # Update critic
             with torch.no_grad():

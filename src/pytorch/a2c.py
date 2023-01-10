@@ -199,24 +199,24 @@ def main():
         td_target = td_target.squeeze()
 
         # Flatten batch
-        _states = states.flatten(0, 1)
-        _actions = actions.flatten(0, 1)
-        _td_target = td_target.reshape(-1)
+        states_batch = states.flatten(0, 1)
+        actions_batch = actions.flatten(0, 1)
+        td_target_batch = td_target.reshape(-1)
 
         # Shuffle batch
         batch_indexes = torch.randperm(args.batch_size)
 
-        _states = _states[batch_indexes]
-        _actions = _actions[batch_indexes]
-        _td_target = _td_target[batch_indexes]
+        states_batch = states_batch[batch_indexes]
+        actions_batch = actions_batch[batch_indexes]
+        td_target_batch = td_target_batch[batch_indexes]
 
         # Update policy
-        log_probs, td_predict = policy_net.get_logprob_value(_states, _actions)
+        log_probs, td_predict = policy_net.get_logprob_value(states_batch, actions_batch)
 
-        advantages = _td_target - td_predict
+        advantages = td_target_batch - td_predict
 
         policy_loss = (-log_probs * advantages).mean()
-        value_loss = mse_loss(_td_target, td_predict)
+        value_loss = mse_loss(td_target_batch, td_predict)
 
         loss = policy_loss + value_loss
 

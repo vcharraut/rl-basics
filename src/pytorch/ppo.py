@@ -227,11 +227,11 @@ def main():
         advantages = advantages.squeeze()
 
         # Flatten batch
-        _states = states.flatten(0, 1)
-        _actions = actions.flatten(0, 1)
-        _log_probs = log_probs.reshape(-1)
-        _td_target = td_target.reshape(-1)
-        _advantages = advantages.reshape(-1)
+        states_batch = states.flatten(0, 1)
+        actions_batch = actions.flatten(0, 1)
+        logprobs_batch = log_probs.reshape(-1)
+        td_target_batch = td_target.reshape(-1)
+        advantages_batch = advantages.reshape(-1)
 
         batch_indexes = np.arange(args.batch_size)
 
@@ -252,9 +252,9 @@ def main():
                     new_log_probs,
                     td_predict,
                     dist_entropy,
-                ) = policy_net.get_action_value(_states[index], _actions[index])
+                ) = policy_net.get_action_value(states_batch[index], actions_batch[index])
 
-                logratio = new_log_probs - _log_probs[index]
+                logratio = new_log_probs - logprobs_batch[index]
                 ratios = logratio.exp()
 
                 with torch.no_grad():
@@ -263,15 +263,15 @@ def main():
                     approx_kl = ((ratios - 1) - logratio).mean()
                     clipfracs += [((ratios - 1.0).abs() > 0.2).float().mean().item()]
 
-                surr1 = _advantages[index] * ratios
+                surr1 = advantages_batch[index] * ratios
 
-                surr2 = _advantages[index] * torch.clamp(
+                surr2 = advantages_batch[index] * torch.clamp(
                     ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip
                 )
 
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = args.value_factor * mse_loss(td_predict, _td_target[index])
+                value_loss = args.value_factor * mse_loss(td_predict, td_target_batch[index])
 
                 entropy_bonus = args.entropy_factor * dist_entropy.mean()
 
