@@ -14,7 +14,7 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 | A2C [[2]](#references)  |     X    |      X     |
 | PPO [[3]](#references)  |     X    |      X     |
 | DDPG [[4]](#references) |          |      X     |
-| TD3 [[5]](#references)  |          |            |
+| TD3 [[5]](#references)  |          |      X     |
 | SAC [[6]](#references)  |          |            |
 
 ---
