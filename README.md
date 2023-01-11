@@ -58,11 +58,11 @@ python src/td3.py
 To view logs on Tensorboard:
 
 ```shell
-poetry run tensorboard --logdirs=runs
+poetry run tensorboard --logdir=runs
 ```
 
 ## Results
 
 ## Acknowledgments
 
-- [CleanRL](https://github.com/vwxyzjn/cleanrl)
+- [CleanRL](https://github.com/vwxyzjn/cleanrl): Some parts of my implementations come directly from the repository, so if you look for a complete and detailed code, you should check it first!
