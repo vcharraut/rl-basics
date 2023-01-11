@@ -130,7 +130,7 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__a2c__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__a2c__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
