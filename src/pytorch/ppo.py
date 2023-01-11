@@ -247,12 +247,9 @@ def main():
                 end = start + args.minibatch_size
                 index = batch_indexes[start:end]
 
-                (
-                    _,
-                    new_log_probs,
-                    td_predict,
-                    dist_entropy,
-                ) = policy_net.get_action_value(states_batch[index], actions_batch[index])
+                _, new_log_probs, td_predict, dist_entropy = policy_net.get_action_value(
+                    states_batch[index], actions_batch[index]
+                )
 
                 logratio = new_log_probs - logprobs_batch[index]
                 ratios = logratio.exp()
