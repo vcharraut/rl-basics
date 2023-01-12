@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn, optim
+from torch.distributions import Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
@@ -18,7 +19,7 @@ simplefilter(action="ignore", category=DeprecationWarning)
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="Humanoid-v4")
+    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
     parser.add_argument("--total-timesteps", type=int, default=int(1e6))
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--buffer-size", type=int, default=int(1e5))
@@ -146,7 +147,7 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__td3__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__td3__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -193,13 +194,11 @@ def main():
     for global_step in tqdm(range(args.total_timesteps)):
 
         if global_step < args.learning_start:
-            action_arr = np.array([env.single_action_space.sample()])
-            action = torch.from_numpy(action_arr).to(args.device)
+            action = Uniform(action_low, action_high).sample().unsqueeze(0)
         else:
             with torch.no_grad():
                 action = actor(state)
                 action += torch.normal(0, actor.action_scale * args.exploration_noise)
-                action = torch.clamp(action, action_low, action_high)
 
         next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
 
@@ -222,9 +221,14 @@ def main():
 
             # Update critic
             with torch.no_grad():
-                clipped_noise = (torch.randn_like(actions) * args.policy_noise).clamp(
-                    -args.noise_clip, args.noise_clip
-                ) * target_actor.action_scale
+                clipped_noise = (
+                    torch.clamp(
+                        (torch.randn_like(actions) * args.policy_noise),
+                        -args.noise_clip,
+                        args.noise_clip,
+                    )
+                    * target_actor.action_scale
+                )
 
                 next_state_actions = torch.clamp(
                     (target_actor(next_states) + clipped_noise), action_low, action_high

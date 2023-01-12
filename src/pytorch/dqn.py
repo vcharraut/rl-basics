@@ -124,7 +124,7 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parent, "runs", f"{args.env}__dqn__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__dqn__{date}")
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -138,7 +138,7 @@ def main():
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
-    # Create vectorized environment(s)
+    # Create vectorized environment
     env = gym.vector.AsyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
 
     obversation_shape = env.single_observation_space.shape
@@ -165,7 +165,7 @@ def main():
 
             # Choice between exploration or intensification
             if np.random.rand() < exploration_prob:
-                action = torch.tensor([env.single_action_space.sample()]).to(args.device)
+                action = torch.randint(action_shape, (1,)).to(args.device)
             else:
                 action = torch.argmax(policy_net(state), dim=1)
 
