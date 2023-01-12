@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--buffer-size", type=int, default=int(1e5))
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--list-layer", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--exploration-noise", type=float, default=0.1)
@@ -96,16 +96,17 @@ class ActorNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape, action_low, action_high):
         super().__init__()
 
-        obversation_shape = np.prod(obversation_shape)
+        current_layer_value = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
-        self.network = nn.Sequential(
-            nn.Linear(obversation_shape, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, action_shape),
-        )
+        self.network = nn.Sequential()
+
+        for layer_value in args.list_layer:
+            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.ReLU())
+            current_layer_value = layer_value
+
+        self.network.append(nn.Linear(current_layer_value, action_shape))
 
         # action rescaling
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
@@ -125,22 +126,22 @@ class CriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
         super().__init__()
 
-        input_shape = np.prod(obversation_shape) + np.prod(action_shape)
+        current_layer_value = np.prod(obversation_shape) + np.prod(action_shape)
 
-        self.network = nn.Sequential(
-            nn.Linear(input_shape, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1),
-        )
+        self.network = nn.Sequential()
+
+        for layer_value in args.list_layer:
+            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.ReLU())
+            current_layer_value = layer_value
+
+        self.network.append(nn.Linear(current_layer_value, 1))
 
         if args.device.type == "cuda":
             self.cuda()
 
     def forward(self, state, action):
-        input_ = torch.cat([state, action], 1)
-        return self.network(input_)
+        return self.network(torch.cat([state, action], 1))
 
 
 def main():
@@ -148,6 +149,8 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__td3__{date}")
+
+    # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -161,14 +164,16 @@ def main():
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
-    # Create vectorized environment(s)
+    # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
 
+    # Metadata about the environment
     obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.shape
     action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
     action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
 
+    # Create the policy networks
     actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic1 = CriticNet(args, obversation_shape, action_shape)
@@ -185,10 +190,11 @@ def main():
         list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate
     )
 
+    # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
+    # Generate the initial state of the environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
-
     state = torch.from_numpy(state).to(args.device).float()
 
     for global_step in tqdm(range(args.total_timesteps)):
@@ -268,6 +274,10 @@ def main():
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
+
+                # Log metrics on Tensorboard
+                writer.add_scalar("update/actor_loss", actor_loss, global_step)
+                writer.add_scalar("update/critic_loss", critic_loss, global_step)
 
     env.close()
     writer.close()

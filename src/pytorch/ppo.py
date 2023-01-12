@@ -136,6 +136,8 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__ppo__{date}")
+
+    # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -154,9 +156,11 @@ def main():
         [make_env(args.env, i, run_dir, args.capture_video) for i in range(args.num_envs)]
     )
 
+    # Metadata about the environment
     obversation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
 
+    # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
 
     # Initialize batch variables
@@ -167,6 +171,7 @@ def main():
     log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     state_values = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
+    # Generate the initial state of the environment
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
@@ -266,13 +271,13 @@ def main():
                     ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip
                 )
 
-                policy_loss = -torch.min(surr1, surr2).mean()
+                actor_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = args.value_factor * mse_loss(td_predict, td_target_batch[index])
+                critic_loss = args.value_factor * mse_loss(td_predict, td_target_batch[index])
 
                 entropy_bonus = args.entropy_factor * dist_entropy.mean()
 
-                loss = policy_loss + value_loss - entropy_bonus
+                loss = actor_loss + critic_loss - entropy_bonus
 
                 policy_net.optimizer.zero_grad()
                 loss.backward()
@@ -283,8 +288,8 @@ def main():
         policy_net.scheduler.step()
 
         # Log metrics on Tensorboard
-        writer.add_scalar("update/policy_loss", policy_loss, global_step)
-        writer.add_scalar("update/value_loss", value_loss, global_step)
+        writer.add_scalar("update/actor_loss", actor_loss, global_step)
+        writer.add_scalar("update/critic_loss", critic_loss, global_step)
         writer.add_scalar("debug/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("debug/approx_kl", approx_kl, global_step)
         writer.add_scalar("debug/clipfrac", np.mean(clipfracs), global_step)

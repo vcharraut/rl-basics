@@ -159,6 +159,8 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__dqn__{date}")
+    
+    # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -172,9 +174,10 @@ def main():
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
-    # Create vectorized environment(s)
-    env = gym.vector.AsyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
+    # Create vectorized environment
+    env = gym.vector.SyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
 
+    # Metadata about the environment
     obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
@@ -182,8 +185,10 @@ def main():
     target_net = QNetwork(args, action_shape)
     target_net.load_state_dict(policy_net.state_dict())
 
+    # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
+    # Generate the initial state of the environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
 
     for global_step in tqdm(range(args.total_timesteps)):
@@ -237,14 +242,10 @@ def main():
                 policy_net.optimizer.step()
 
                 # Update target network
-                target_net_dict = dict(target_net.state_dict())
-                policy_net_dict = dict(policy_net.state_dict())
-
-                for key, value in policy_net_dict.items():
-                    target_net_dict[key] = value * args.tau + target_net_dict[key] * (
-                        1.0 - args.tau
+                for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
+                    target_param.data.copy_(
+                        args.tau * param.data + (1 - args.tau) * target_param.data
                     )
-                target_net.load_state_dict(target_net_dict)
 
                 # Log metrics on Tensorboard
                 writer.add_scalar("update/loss", loss, global_step)

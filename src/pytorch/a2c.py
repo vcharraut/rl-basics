@@ -123,6 +123,8 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__a2c__{date}")
+
+    # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -141,9 +143,11 @@ def main():
         [make_env(args.env, i, run_dir, args.capture_video) for i in range(args.num_envs)]
     )
 
+    # Metadata about the environment
     obversation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
 
+    # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
 
     # Initialize batch variables
@@ -152,6 +156,7 @@ def main():
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
 
+    # Generate the initial state of the environment
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
@@ -215,10 +220,10 @@ def main():
 
         advantages = td_target_batch - td_predict
 
-        policy_loss = (-log_probs * advantages).mean()
-        value_loss = mse_loss(td_target_batch, td_predict)
+        actor_loss = (-log_probs * advantages).mean()
+        critic_loss = mse_loss(td_target_batch, td_predict)
 
-        loss = policy_loss + value_loss
+        loss = actor_loss + critic_loss
 
         policy_net.optimizer.zero_grad()
         loss.backward()
@@ -226,8 +231,8 @@ def main():
         policy_net.optimizer.step()
 
         # Log metrics on Tensorboard
-        writer.add_scalar("update/policy_loss", policy_loss, global_step)
-        writer.add_scalar("update/value_loss", value_loss, global_step)
+        writer.add_scalar("update/actor_loss", actor_loss, global_step)
+        writer.add_scalar("update/critic_loss", critic_loss, global_step)
 
     envs.close()
     writer.close()
