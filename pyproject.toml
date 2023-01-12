@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "rl-gym"
+name = "rl-gym-zoo"
 version = "0.1.0"
 description = ""
 authors = ["Valentin Canete <valentin.canete@gmail.com>"]
 license = "GNU General Public License v3.0"
 readme = "README.md"
-packages = [{include = "rl_gym"}]
+packages = [{include = "rl_gym_zoo"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -29,6 +29,7 @@ snakeviz = "^2.1.1"
 
 [tool.black]
 line-length = 100
+
 
 [build-system]
 requires = ["poetry-core"]
