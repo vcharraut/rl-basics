@@ -1,5 +1,6 @@
 import argparse
 import random
+import time
 from datetime import datetime
 from pathlib import Path
 from warnings import simplefilter
@@ -36,14 +37,14 @@ def parse_args():
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
-    _args = parser.parse_args()
+    args = parser.parse_args()
 
-    _args.device = torch.device("cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
-    _args.batch_size = int(_args.num_envs * _args.num_steps)
-    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
-    _args.num_updates = int(_args.total_timesteps // _args.num_steps)
+    args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
+    args.batch_size = int(args.num_envs * args.num_steps)
+    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    args.num_updates = int(args.total_timesteps // args.num_steps)
 
-    return _args
+    return args
 
 
 def make_env(env_id, idx, run_dir, capture_video):
@@ -168,6 +169,7 @@ def main():
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
+    start_time = time.process_time()
 
     for _ in tqdm(range(args.num_updates)):
 
@@ -286,6 +288,9 @@ def main():
         writer.add_scalar("debug/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("debug/approx_kl", approx_kl, global_step)
         writer.add_scalar("debug/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar(
+            "update/SPS", int(global_step / (time.process_time() - start_time)), global_step
+        )
 
     envs.close()
     writer.close()

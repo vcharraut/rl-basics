@@ -1,5 +1,6 @@
 import argparse
 import random
+import time
 from datetime import datetime
 from pathlib import Path
 from warnings import simplefilter
@@ -8,7 +9,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn, optim
-from torch.distributions import Categorical
+from torch.distributions import Normal
 from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -19,12 +20,12 @@ simplefilter(action="ignore", category=DeprecationWarning)
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total-timesteps", type=int, default=int(5e5))
+    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
+    parser.add_argument("--total-timesteps", type=int, default=int(1e6))
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--num-steps", type=int, default=2048)
     parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-optims", type=int, default=4)
+    parser.add_argument("--num-optims", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -36,14 +37,14 @@ def parse_args():
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
-    _args = parser.parse_args()
+    args = parser.parse_args()
 
-    _args.device = torch.device("cpu" if _args.cpu or not torch.cuda.is_available() else "cuda")
-    _args.batch_size = int(_args.num_envs * _args.num_steps)
-    _args.minibatch_size = int(_args.batch_size // _args.num_minibatches)
-    _args.num_updates = int(_args.total_timesteps // _args.num_steps)
+    args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
+    args.batch_size = int(args.num_envs * args.num_steps)
+    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    args.num_updates = int(args.total_timesteps // args.num_steps)
 
-    return _args
+    return args
 
 
 def make_env(env_id, idx, run_dir, capture_video):
@@ -54,6 +55,7 @@ def make_env(env_id, idx, run_dir, capture_video):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
@@ -81,6 +83,7 @@ class ActorCriticNet(nn.Module):
         super().__init__()
 
         current_layer_value = np.prod(obversation_shape)
+        action_shape = np.prod(action_shape)
 
         self.actor_net = nn.Sequential()
         self.critic_net = nn.Sequential()
@@ -98,11 +101,12 @@ class ActorCriticNet(nn.Module):
 
         self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
 
+        self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
+
         self.optimizer = optim.AdamW(self.parameters(), lr=args.learning_rate)
 
         self.scheduler = optim.lr_scheduler.LambdaLR(
-            self.optimizer,
-            lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates,
+            self.optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
         )
 
         if args.device.type == "cuda":
@@ -113,14 +117,15 @@ class ActorCriticNet(nn.Module):
 
     def get_action_value(self, state, action=None):
 
-        actor_value = self.actor_net(state)
-        distribution = Categorical(logits=actor_value)
+        action_mean = self.actor_net(state)
+        action_std = self.actor_logstd.expand_as(action_mean).exp()
+        distribution = Normal(action_mean, action_std)
 
         if action is None:
             action = distribution.sample()
 
-        log_prob = distribution.log_prob(action)
-        dist_entropy = distribution.entropy()
+        log_prob = distribution.log_prob(action).sum(-1)
+        dist_entropy = distribution.entropy().sum(-1)
 
         critic_value = self.critic_net(state).squeeze()
 
@@ -158,14 +163,14 @@ def main():
 
     # Metadata about the environment
     obversation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.n
+    action_shape = envs.single_action_space.shape
 
     # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
 
     # Initialize batch variables
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
-    actions = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape).to(args.device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
     log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
@@ -175,6 +180,7 @@ def main():
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
+    start_time = time.process_time()
 
     for _ in tqdm(range(args.num_updates)):
 
@@ -293,6 +299,9 @@ def main():
         writer.add_scalar("debug/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("debug/approx_kl", approx_kl, global_step)
         writer.add_scalar("debug/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar(
+            "update/SPS", int(global_step / (time.process_time() - start_time)), global_step
+        )
 
     envs.close()
     writer.close()

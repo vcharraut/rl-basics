@@ -1,6 +1,7 @@
 import argparse
 import math
 import random
+import time
 from collections import deque, namedtuple
 from datetime import datetime
 from pathlib import Path
@@ -33,12 +34,12 @@ def parse_args():
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
-    _args = parser.parse_args()
+    args = parser.parse_args()
 
-    _args.device = torch.device("cuda")
-    _args.eps_decay = int(_args.total_timesteps * 0.10)
+    args.device = torch.device("cuda")
+    args.eps_decay = int(args.total_timesteps * 0.10)
 
-    return _args
+    return args
 
 
 def make_env(env_id, run_dir, capture_video):
@@ -159,7 +160,7 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__dqn__{date}")
-    
+
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
@@ -181,6 +182,7 @@ def main():
     obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
+    # Create the policy networks
     policy_net = QNetwork(args, action_shape)
     target_net = QNetwork(args, action_shape)
     target_net.load_state_dict(policy_net.state_dict())
@@ -190,6 +192,8 @@ def main():
 
     # Generate the initial state of the environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
+
+    start_time = time.process_time()
 
     for global_step in tqdm(range(args.total_timesteps)):
 
@@ -249,6 +253,10 @@ def main():
 
                 # Log metrics on Tensorboard
                 writer.add_scalar("update/loss", loss, global_step)
+
+        writer.add_scalar(
+            "update/SPS", int(global_step / (time.process_time() - start_time)), global_step
+        )
 
     env.close()
     writer.close()
