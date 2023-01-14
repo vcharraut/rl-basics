@@ -1,1 +1,1 @@
-# A2C
+# A2C - Advantage Actor Critic

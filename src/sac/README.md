@@ -1,1 +1,1 @@
-# SAC
+# SAC - Soft Actor-Critic

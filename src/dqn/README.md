@@ -1,1 +1,1 @@
-# DQN
+# DQN - Deep Q-Learning Network
