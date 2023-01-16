@@ -10,18 +10,18 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 
 | RL Algorithm                                           | Pytorch                                                                                                                                                                                                                                                                                           | Flax |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| [DQN](https://arxiv.org/abs/1312.5602)                 | [dqn.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/dqn.py) - [dqn_atari.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/dqn_atari.py)                                                                                                             |      |
-| [A2C](https://arxiv.org/abs/1602.01783)                | [a2c.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/a2c.py) - [a2c_continuous.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/a2c_continuous.py)                                                                                                   |      |
-| [PPO](https://arxiv.org/abs/1707.06347)                | [ppo.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/ppo.py) - [ppo_continuous.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/ppo_continuous.py) - [ppo_atari.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/ppo_atari.py) |      |
-| [DDPG](https://proceedings.mlr.press/v32/silver14.pdf) | [ddpg.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/ddpg.py)                                                                                                                                                                                                             |      |
-| [TD3](https://arxiv.org/abs/1802.09477)                | [td3.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/pytorch/td3.py)                                                                                                                                                                                                               |      |
+| [DQN](https://arxiv.org/abs/1312.5602)                 | [dqn.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/dqn.py) - [dqn_atari.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/dqn_atari.py)                                                                                                             |      |
+| [A2C](https://arxiv.org/abs/1602.01783)                | [a2c.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/a2c.py) - [a2c_continuous.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/a2c_continuous.py)                                                                                                   |      |
+| [PPO](https://arxiv.org/abs/1707.06347)                | [ppo.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/ppo.py) - [ppo_continuous.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/ppo_continuous.py) - [ppo_atari.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/ppo_atari.py) |      |
+| [DDPG](https://proceedings.mlr.press/v32/silver14.pdf) | [ddpg.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ddpg/ddpg.py)                                                                                                                                                                                                             |      |
+| [TD3](https://arxiv.org/abs/1802.09477)                | [td3.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/td3/td3.py)                                                                                                                                                                                                               |      |
 | [SAC](https://arxiv.org/abs/1801.01290)                |                                                                                                                                                                                                                                                                                                   |      |
 
 ## Prerequisites
 
 - poetry >= 1.3.0
-
 - python >= 3.10
+
 - numpy >= 1.24.0
 - gymnasium >= 0.27.0
 - torch >= 1.13.1
@@ -43,16 +43,23 @@ poetry install
 poetry shell
 
 # DQN
-python src/dqn.py
+python src/dqn/dqn.py
+python src/dqn/dqn_atari.py
 
 # PPO
-python src/ppo.py
+python src/a2c/a2c.py
+python src/a2c/a2c_continuous.py
+
+# PPO
+python src/ppo/ppo.py
+python src/ppo/ppo_continuous.py
+python src/ppo/ppo_atari.py
 
 # DDPG
-python src/ddpg.py
+python src/ddpg/ddpg.py
 
 # TD3
-python src/td3.py
+python src/td3/td3.py
 ```
 
 To view logs on Tensorboard:
