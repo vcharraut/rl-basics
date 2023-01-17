@@ -125,7 +125,7 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parent, "../runs", f"{args.env}__dqn__{date}")
+    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__dqn__{date}")
 
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
@@ -221,7 +221,7 @@ def main():
                 writer.add_scalar("update/loss", loss, global_step)
 
         writer.add_scalar(
-            "update/SPS", int(global_step / (time.process_time() - start_time)), global_step
+            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )
 
     env.close()
