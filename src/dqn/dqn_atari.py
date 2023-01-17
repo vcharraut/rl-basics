@@ -142,8 +142,6 @@ class QNetwork(nn.Module):
             layer_init(nn.Linear(512, action_shape), std=0.01),
         )
 
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
-
         if args.device.type == "cuda":
             self.cuda()
 
@@ -186,6 +184,8 @@ def main():
     policy_net = QNetwork(args, action_shape)
     target_net = QNetwork(args, action_shape)
     target_net.load_state_dict(policy_net.state_dict())
+
+    optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
@@ -241,9 +241,9 @@ def main():
 
                 loss = mse_loss(td_predict, td_target)
 
-                policy_net.optimizer.zero_grad()
+                optimizer.zero_grad()
                 loss.backward()
-                policy_net.optimizer.step()
+                optimizer.step()
 
                 # Update target network
                 for param, target_param in zip(policy_net.parameters(), target_net.parameters()):

@@ -89,10 +89,7 @@ class ActorCriticNet(nn.Module):
             current_layer_value = layer_value
 
         self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
-
         self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
-
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
         if args.device.type == "cuda":
             self.cuda()
@@ -150,6 +147,7 @@ def main():
 
     # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+    optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Initialize batch variables
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
@@ -227,10 +225,10 @@ def main():
 
         loss = actor_loss + critic_loss
 
-        policy_net.optimizer.zero_grad()
+        optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(policy_net.parameters(), 0.5)
-        policy_net.optimizer.step()
+        optimizer.step()
 
         # Log metrics on Tensorboard
         writer.add_scalar("update/actor_loss", actor_loss, global_step)

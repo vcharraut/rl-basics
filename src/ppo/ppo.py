@@ -99,13 +99,6 @@ class ActorCriticNet(nn.Module):
 
         self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
 
-        self.optimizer = optim.AdamW(self.parameters(), lr=args.learning_rate)
-
-        self.scheduler = optim.lr_scheduler.LambdaLR(
-            self.optimizer,
-            lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates,
-        )
-
         if args.device.type == "cuda":
             self.cuda()
 
@@ -163,6 +156,11 @@ def main():
 
     # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+
+    optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
+    )
 
     # Initialize batch variables
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
@@ -281,13 +279,13 @@ def main():
 
                 loss = actor_loss + critic_loss - entropy_bonus
 
-                policy_net.optimizer.zero_grad()
+                optimizer.zero_grad()
                 loss.backward()
                 clip_grad_norm_(policy_net.parameters(), 0.5)
-                policy_net.optimizer.step()
+                optimizer.step()
 
         # Annealing learning rate
-        policy_net.scheduler.step()
+        scheduler.step()
 
         # Log metrics on Tensorboard
         writer.add_scalar("update/actor_loss", actor_loss, global_step)

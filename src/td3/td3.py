@@ -113,8 +113,6 @@ class ActorNet(nn.Module):
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
         self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
 
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
-
         if args.device.type == "cuda":
             self.cuda()
 

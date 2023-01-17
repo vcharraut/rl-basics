@@ -111,8 +111,6 @@ class ActorNet(nn.Module):
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
         self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
 
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
-
         if args.device.type == "cuda":
             self.cuda()
 
@@ -135,8 +133,6 @@ class CriticNet(nn.Module):
             current_layer_value = layer_value
 
         self.network.append(nn.Linear(current_layer_value, 1))
-
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
 
         if args.device.type == "cuda":
             self.cuda()
@@ -182,6 +178,9 @@ def main():
 
     target_actor.load_state_dict(actor.state_dict())
     critic_target.load_state_dict(critic.state_dict())
+
+    actor_optimizer = optim.Adam(actor.parameters(), lr=args.learning_rate)
+    critic_optimizer = optim.Adam(critic.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
@@ -231,16 +230,16 @@ def main():
 
             critic_loss = mse_loss(td_predict, td_target)
 
-            critic.optimizer.zero_grad()
+            critic_optimizer.zero_grad()
             critic_loss.backward()
-            critic.optimizer.step()
+            critic_optimizer.step()
 
             # Update actor
             if global_step % args.policy_frequency == 0:
                 actor_loss = -critic(states, actor(states)).mean()
-                actor.optimizer.zero_grad()
+                actor_optimizer.zero_grad()
                 actor_loss.backward()
-                actor.optimizer.step()
+                actor_optimizer.step()
 
                 # Update the target network
                 for param, target_param in zip(actor.parameters(), target_actor.parameters()):
