@@ -10,6 +10,7 @@ from warnings import simplefilter
 import gymnasium as gym
 import numpy as np
 import torch
+import wandb
 from torch import nn, optim
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -21,19 +22,20 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total-timesteps", type=int, default=500000)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--buffer-size", type=int, default=10000)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--total_timesteps", type=int, default=500000)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--buffer_size", type=int, default=10000)
+    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=5e-3)
-    parser.add_argument("--eps-end", type=float, default=0.05)
-    parser.add_argument("--eps-start", type=int, default=1)
-    parser.add_argument("--learning-start", type=int, default=10000)
-    parser.add_argument("--train-frequency", type=int, default=10)
+    parser.add_argument("--eps_end", type=float, default=0.05)
+    parser.add_argument("--eps_start", type=int, default=1)
+    parser.add_argument("--learning_start", type=int, default=10000)
+    parser.add_argument("--train_frequency", type=int, default=10)
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--capture-video", action="store_true")
+    parser.add_argument("--capture_video", action="store_true")
+    parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
@@ -124,6 +126,16 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__dqn__{date}")
+
+    if args.wandb:
+        wandb.init(
+            project="rl-gym-zoo",
+            name=f"{args.env}_dqn",
+            sync_tensorboard=True,
+            config=vars(args),
+            dir=run_dir,
+            save_code=True,
+        )
 
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)

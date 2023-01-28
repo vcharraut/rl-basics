@@ -8,6 +8,7 @@ from warnings import simplefilter
 import gymnasium as gym
 import numpy as np
 import torch
+import wandb
 from torch import nn, optim
 from torch.distributions import Categorical
 from torch.nn.functional import mse_loss
@@ -21,20 +22,21 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total-timesteps", type=int, default=int(5e5))
-    parser.add_argument("--num-envs", type=int, default=1)
-    parser.add_argument("--num-steps", type=int, default=2048)
-    parser.add_argument("--num-minibatches", type=int, default=32)
-    parser.add_argument("--num-optims", type=int, default=4)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--total_timesteps", type=int, default=int(5e5))
+    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--num_steps", type=int, default=2048)
+    parser.add_argument("--num_minibatches", type=int, default=32)
+    parser.add_argument("--num_optims", type=int, default=4)
+    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
-    parser.add_argument("--eps-clip", type=float, default=0.2)
-    parser.add_argument("--value-factor", type=float, default=0.5)
-    parser.add_argument("--entropy-factor", type=float, default=0.01)
+    parser.add_argument("--eps_clip", type=float, default=0.2)
+    parser.add_argument("--value_factor", type=float, default=0.5)
+    parser.add_argument("--entropy_factor", type=float, default=0.01)
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--capture-video", action="store_true")
+    parser.add_argument("--capture_video", action="store_true")
+    parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
@@ -131,6 +133,16 @@ def main():
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__ppo__{date}")
 
+    if args.wandb:
+        wandb.init(
+            project="rl-gym-zoo",
+            name=f"{args.env}_ppo",
+            sync_tensorboard=True,
+            config=vars(args),
+            dir=run_dir,
+            save_code=True,
+        )
+
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
@@ -156,6 +168,8 @@ def main():
 
     # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+
+    # wandb.watch(policy_net)
 
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(
@@ -295,6 +309,16 @@ def main():
         writer.add_scalar("debug/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
+        )
+        wandb.log(
+            {
+                "update/actor_loss": actor_loss,
+                "update/critic_loss": critic_loss,
+                "debug/old_approx_kl": old_approx_kl,
+                "debug/approx_kl": approx_kl,
+                "debug/clipfrac": np.mean(clipfracs),
+                "rollout/SPS": int(global_step / (time.process_time() - start_time)),
+            }
         )
 
     envs.close()

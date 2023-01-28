@@ -8,6 +8,7 @@ from warnings import simplefilter
 import gymnasium as gym
 import numpy as np
 import torch
+import wandb
 from torch import nn, optim
 from torch.distributions import Categorical
 from torch.nn.functional import mse_loss
@@ -21,14 +22,15 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total-timesteps", type=int, default=10000000)
-    parser.add_argument("--num-envs", type=int, default=8)
-    parser.add_argument("--num-steps", type=int, default=128)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--list-layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--total_timesteps", type=int, default=10000000)
+    parser.add_argument("--num_envs", type=int, default=8)
+    parser.add_argument("--num_steps", type=int, default=128)
+    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--capture-video", action="store_true")
+    parser.add_argument("--capture_video", action="store_true")
+    parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
@@ -118,6 +120,16 @@ def main():
 
     date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__a2c__{date}")
+
+    if args.wandb:
+        wandb.init(
+            project="rl-gym-zoo",
+            name=f"{args.env}_a2c",
+            sync_tensorboard=True,
+            config=vars(args),
+            dir=run_dir,
+            save_code=True,
+        )
 
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
