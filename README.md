@@ -70,6 +70,9 @@ poetry run tensorboard --logdir=runs
 
 ## Results
 
+![lunar-lander](img/lunarlander.png)
+![half-cheetah](img/halfcheetah.png)
+
 ## Acknowledgments
 
 - [CleanRL](https://github.com/vwxyzjn/cleanrl): Some parts of my implementations come directly from the repository, so if you look for a complete and detailed code, you should check it first!

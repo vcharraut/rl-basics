@@ -126,8 +126,8 @@ def main():
 
     if args.wandb:
         wandb.init(
-            project="rl-gym-zoo",
-            name=f"{args.env}_a2c",
+            project=args.env,
+            name="A2C",
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,

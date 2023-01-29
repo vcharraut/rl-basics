@@ -155,7 +155,7 @@ def main():
 
     if args.wandb:
         wandb.init(
-            project="rl-gym-zoo",
+            project=args.env,
             name=f"{args.env}_sac",
             sync_tensorboard=True,
             config=vars(args),

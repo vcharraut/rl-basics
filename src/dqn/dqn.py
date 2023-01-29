@@ -129,8 +129,8 @@ def main():
 
     if args.wandb:
         wandb.init(
-            project="rl-gym-zoo",
-            name=f"{args.env}_dqn",
+            project=args.env,
+            name="DQN",
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,
