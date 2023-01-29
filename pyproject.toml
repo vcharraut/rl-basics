@@ -15,6 +15,7 @@ torch = "^1.13.0"
 tensorboard = "^2.11.0"
 gymnasium = {extras = ["all"], version = "^0.27.0"}
 flax = "^0.6.3"
+wandb = "^0.13.9"
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.12.0"

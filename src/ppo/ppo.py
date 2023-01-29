@@ -310,16 +310,6 @@ def main():
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )
-        wandb.log(
-            {
-                "update/actor_loss": actor_loss,
-                "update/critic_loss": critic_loss,
-                "debug/old_approx_kl": old_approx_kl,
-                "debug/approx_kl": approx_kl,
-                "debug/clipfrac": np.mean(clipfracs),
-                "rollout/SPS": int(global_step / (time.process_time() - start_time)),
-            }
-        )
 
     envs.close()
     writer.close()
