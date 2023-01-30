@@ -1,7 +1,7 @@
-.vscode/
 .venv/
 runs/
 
 *.pt
 debug.py
 poetry.lock
+MUJOCO_LOG.TXT
