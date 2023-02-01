@@ -186,18 +186,19 @@ def main():
 
     # Create the policy networks
     actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
-    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic1 = CriticNet(args, obversation_shape, action_shape)
-    critic1_target = CriticNet(args, obversation_shape, action_shape)
     critic2 = CriticNet(args, obversation_shape, action_shape)
-    critic2_target = CriticNet(args, obversation_shape, action_shape)
+
+    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
+    target_critic1 = CriticNet(args, obversation_shape, action_shape)
+    target_critic2 = CriticNet(args, obversation_shape, action_shape)
 
     target_actor.load_state_dict(actor.state_dict())
-    critic1_target.load_state_dict(critic1.state_dict())
-    critic2_target.load_state_dict(critic2.state_dict())
+    target_critic1.load_state_dict(critic1.state_dict())
+    target_critic2.load_state_dict(critic2.state_dict())
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr=args.learning_rate)
-    critic_optimizer = optim.Adam(
+    optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
+    optimizer_critic = optim.Adam(
         list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate
     )
 
@@ -252,8 +253,8 @@ def main():
                 next_state_actions = torch.clamp(
                     (target_actor(next_states) + clipped_noise), action_low, action_high
                 )
-                critic1_next_target = critic1_target(next_states, next_state_actions).squeeze()
-                critic2_next_target = critic2_target(next_states, next_state_actions).squeeze()
+                critic1_next_target = target_critic1(next_states, next_state_actions).squeeze()
+                critic2_next_target = target_critic2(next_states, next_state_actions).squeeze()
                 min_qf_next_target = torch.min(critic1_next_target, critic2_next_target)
                 next_q_value = rewards + (1.0 - flags) * args.gamma * min_qf_next_target
 
@@ -263,27 +264,27 @@ def main():
             qf2_loss = mse_loss(qf2_a_values, next_q_value)
             critic_loss = qf1_loss + qf2_loss
 
-            critic_optimizer.zero_grad()
+            optimizer_critic.zero_grad()
             critic_loss.backward()
-            critic_optimizer.step()
+            optimizer_critic.step()
 
             # Update actor
             if global_step % args.policy_frequency == 0:
                 actor_loss = -critic1(states, actor(states)).mean()
-                actor_optimizer.zero_grad()
+                optimizer_actor.zero_grad()
                 actor_loss.backward()
-                actor_optimizer.step()
+                optimizer_actor.step()
 
                 # Update the target network
                 for param, target_param in zip(actor.parameters(), target_actor.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
-                for param, target_param in zip(critic1.parameters(), critic1_target.parameters()):
+                for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
-                for param, target_param in zip(critic2.parameters(), critic2_target.parameters()):
+                for param, target_param in zip(critic2.parameters(), target_critic2.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )

@@ -184,15 +184,16 @@ def main():
 
     # Create the policy networks
     actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
-    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic = CriticNet(args, obversation_shape, action_shape)
-    critic_target = CriticNet(args, obversation_shape, action_shape)
+
+    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
+    target_critic = CriticNet(args, obversation_shape, action_shape)
 
     target_actor.load_state_dict(actor.state_dict())
-    critic_target.load_state_dict(critic.state_dict())
+    target_critic.load_state_dict(critic.state_dict())
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr=args.learning_rate)
-    critic_optimizer = optim.Adam(critic.parameters(), lr=args.learning_rate)
+    optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
+    optimizer_critic = optim.Adam(critic.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
@@ -234,7 +235,7 @@ def main():
             # Update critic
             with torch.no_grad():
                 next_state_actions = target_actor(next_states)
-                critic_next_target = critic_target(next_states, next_state_actions).squeeze()
+                critic_next_target = target_critic(next_states, next_state_actions).squeeze()
 
             td_target = rewards + (1.0 - flags) * args.gamma * critic_next_target
 
@@ -242,23 +243,23 @@ def main():
 
             critic_loss = mse_loss(td_predict, td_target)
 
-            critic_optimizer.zero_grad()
+            optimizer_critic.zero_grad()
             critic_loss.backward()
-            critic_optimizer.step()
+            optimizer_critic.step()
 
             # Update actor
             if global_step % args.policy_frequency == 0:
                 actor_loss = -critic(states, actor(states)).mean()
-                actor_optimizer.zero_grad()
+                optimizer_actor.zero_grad()
                 actor_loss.backward()
-                actor_optimizer.step()
+                optimizer_actor.step()
 
                 # Update the target network
                 for param, target_param in zip(actor.parameters(), target_actor.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
-                for param, target_param in zip(critic.parameters(), critic_target.parameters()):
+                for param, target_param in zip(critic.parameters(), target_critic.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
