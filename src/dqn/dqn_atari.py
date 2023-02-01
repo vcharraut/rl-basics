@@ -22,7 +22,7 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(10e6))
+    parser.add_argument("--total_timesteps", type=int, default=int(1e7))
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--buffer_size", type=int, default=500000)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
