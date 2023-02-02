@@ -22,16 +22,15 @@ simplefilter(action="ignore", category=DeprecationWarning)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=10000000)
+    parser.add_argument("--total_timesteps", type=int, default=int(1e7))
     parser.add_argument("--num_envs", type=int, default=8)
     parser.add_argument("--num_steps", type=int, default=128)
     parser.add_argument("--num_minibatches", type=int, default=4)
     parser.add_argument("--num_optims", type=int, default=4)
-    parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--learning_rate", type=float, default=2.5e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
-    parser.add_argument("--eps_clip", type=float, default=0.2)
+    parser.add_argument("--eps_clip", type=float, default=0.1)
     parser.add_argument("--value_factor", type=float, default=0.5)
     parser.add_argument("--entropy_factor", type=float, default=0.01)
     parser.add_argument("--cpu", action="store_true")
@@ -91,6 +90,7 @@ class ActorCriticNet(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
+
         self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
         self.critic_net = layer_init(nn.Linear(512, 1), std=1)
 
@@ -124,13 +124,16 @@ class ActorCriticNet(nn.Module):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__ppo__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name="PPO",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,
@@ -162,6 +165,8 @@ def main():
 
     # Create the policy network
     policy_net = ActorCriticNet(args, action_shape)
+
+    print(policy_net)
 
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(

@@ -77,20 +77,20 @@ class ActorCriticNet(nn.Module):
 
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape)
+        fc_layer_value = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
         self.actor_net = nn.Sequential()
         self.critic_net = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.actor_net.append(layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.actor_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
             self.actor_net.append(nn.Tanh())
 
-            self.critic_net.append(layer_init(nn.Linear(current_layer_value, layer_value)))
+            self.critic_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
             self.critic_net.append(nn.Tanh())
 
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
         self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
         self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))

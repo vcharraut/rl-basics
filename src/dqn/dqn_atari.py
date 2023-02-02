@@ -24,13 +24,14 @@ def parse_args():
     parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
     parser.add_argument("--total_timesteps", type=int, default=int(1e7))
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--buffer_size", type=int, default=500000)
+    parser.add_argument("--buffer_size", type=int, default=600000)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=5e-3)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
-    parser.add_argument("--learning_start", type=int, default=100000)
+    parser.add_argument("--eps_decay", type=int, default=int(1e6))
+    parser.add_argument("--learning_start", type=int, default=50000)
     parser.add_argument("--train_frequency", type=int, default=4)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -39,7 +40,7 @@ def parse_args():
     args = parser.parse_args()
 
     args.device = torch.device("cuda")
-    args.eps_decay = int(args.total_timesteps * 0.10)
+    args.eps_decay = 1000000
 
     return args
 
@@ -158,13 +159,16 @@ def get_exploration_prob(args, step):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__dqn__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name="DQN",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,

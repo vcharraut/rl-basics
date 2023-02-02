@@ -97,17 +97,17 @@ class ActorNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape, action_low, action_high):
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape)
+        fc_layer_value = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
         self.network = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, action_shape))
+        self.network.append(nn.Linear(fc_layer_value, action_shape))
 
         # action rescaling
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
@@ -125,16 +125,16 @@ class CriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape) + np.prod(action_shape)
+        fc_layer_value = np.prod(obversation_shape) + np.prod(action_shape)
 
         self.network = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, 1))
+        self.network.append(nn.Linear(fc_layer_value, 1))
 
         if args.device.type == "cuda":
             self.cuda()

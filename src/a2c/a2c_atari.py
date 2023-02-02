@@ -26,7 +26,6 @@ def parse_args():
     parser.add_argument("--num_envs", type=int, default=8)
     parser.add_argument("--num_steps", type=int, default=128)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
@@ -84,6 +83,7 @@ class ActorCriticNet(nn.Module):
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
+
         self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
         self.critic_net = layer_init(nn.Linear(512, 1), std=1)
 

@@ -41,7 +41,6 @@ def parse_args():
     args = parser.parse_args()
 
     args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
-    args.eps_decay = int(args.total_timesteps * 0.15)
 
     return args
 
@@ -99,16 +98,16 @@ class QNetwork(nn.Module):
 
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape)
+        fc_layer_value = np.prod(obversation_shape)
 
         self.network = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, action_shape))
+        self.network.append(nn.Linear(fc_layer_value, action_shape))
 
         if args.device.type == "cuda":
             self.cuda()
@@ -124,19 +123,21 @@ def get_exploration_prob(args, step):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__dqn__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name="DQN",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,
             save_code=True,
         )
-
     # Create writer for Tensorboard
     writer = SummaryWriter(run_dir)
     writer.add_text(
