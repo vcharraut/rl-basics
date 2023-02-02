@@ -135,13 +135,16 @@ class ActorCriticNet(nn.Module):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__ppo__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name="PPO",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,

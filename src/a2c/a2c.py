@@ -57,7 +57,7 @@ def make_env(env_id, idx, run_dir, capture_video):
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
-                env=env, video_folder=run_dir + "videos", disable_logger=True
+                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
             )
         return env
 
@@ -121,13 +121,16 @@ class ActorCriticNet(nn.Module):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__a2c__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name="A2C",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,
@@ -159,6 +162,7 @@ def main():
 
     # Create the policy network
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Initialize batch variables
