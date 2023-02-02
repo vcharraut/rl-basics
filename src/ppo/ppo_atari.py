@@ -166,8 +166,6 @@ def main():
     # Create the policy network
     policy_net = ActorCriticNet(args, action_shape)
 
-    print(policy_net)
-
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
