@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import wandb
 from torch import nn, optim
-from torch.distributions import Uniform
+from torch.distributions import Uniform, Normal
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
@@ -29,11 +29,9 @@ def parse_args():
     parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--exploration_noise", type=float, default=0.1)
-    parser.add_argument("--noise_clip", type=float, default=0.5)
-    parser.add_argument("--policy_noise", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.2)
     parser.add_argument("--learning_start", type=int, default=25000)
-    parser.add_argument("--policy_frequency", type=int, default=4)
+    parser.add_argument("--policy_frequency", type=int, default=2)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -57,12 +55,6 @@ def make_env(env_id, run_dir, capture_video):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.FlattenObservation(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=0.99)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
@@ -95,50 +87,71 @@ class ReplayBuffer:
         return states, actions, rewards, next_states, flags
 
 
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
+
+
 class ActorNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape, action_low, action_high):
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape)
+        fc_layer_value = np.prod(obversation_shape)
         action_shape = np.prod(action_shape)
 
         self.network = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, action_shape))
+        self.fc_mean = nn.Linear(fc_layer_value, action_shape)
+        self.fc_logstd = nn.Linear(fc_layer_value, action_shape)
 
         # action rescaling
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
         self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
 
-        self.optimizer = optim.Adam(self.parameters(), lr=args.learning_rate)
-
         if args.device.type == "cuda":
             self.cuda()
 
     def forward(self, state):
-        output = torch.tanh(self.network(state))
-        return output * self.action_scale + self.action_bias
+        output = self.network(state)
+
+        mean = self.fc_mean(output)
+        log_std = torch.tanh(self.fc_logstd(output))
+
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)
+        std = log_std.exp()
+        normal = Normal(mean, std)
+        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        y_t = torch.tanh(x_t)
+
+        action = y_t * self.action_scale + self.action_bias
+        log_prob = normal.log_prob(x_t)
+
+        # Enforcing Action Bound
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_prob = log_prob.sum(1, keepdim=True)
+        mean = torch.tanh(mean) * self.action_scale + self.action_bias
+
+        return action, log_prob.squeeze()
 
 
 class CriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
         super().__init__()
 
-        current_layer_value = np.prod(obversation_shape) + np.prod(action_shape)
+        fc_layer_value = np.prod(obversation_shape) + np.prod(action_shape)
 
         self.network = nn.Sequential()
 
         for layer_value in args.list_layer:
-            self.network.append(nn.Linear(current_layer_value, layer_value))
+            self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
-            current_layer_value = layer_value
+            fc_layer_value = layer_value
 
-        self.network.append(nn.Linear(current_layer_value, 1))
+        self.network.append(nn.Linear(fc_layer_value, 1))
 
         if args.device.type == "cuda":
             self.cuda()
@@ -150,13 +163,16 @@ class CriticNet(nn.Module):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_dir = Path(Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__sac__{date}")
+    date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    algo_name = Path(__file__).stem.split("_")[0].upper()
+    run_dir = Path(
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+    )
 
     if args.wandb:
         wandb.init(
             project=args.env,
-            name=f"{args.env}_sac",
+            name=algo_name,
             sync_tensorboard=True,
             config=vars(args),
             dir=run_dir,
@@ -188,20 +204,21 @@ def main():
 
     # Create the policy networks
     actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
-    target_actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic1 = CriticNet(args, obversation_shape, action_shape)
-    critic1_target = CriticNet(args, obversation_shape, action_shape)
     critic2 = CriticNet(args, obversation_shape, action_shape)
-    critic2_target = CriticNet(args, obversation_shape, action_shape)
 
-    target_actor.load_state_dict(actor.state_dict())
-    critic1_target.load_state_dict(critic1.state_dict())
-    critic2_target.load_state_dict(critic2.state_dict())
+    target_critic1 = CriticNet(args, obversation_shape, action_shape)
+    target_critic2 = CriticNet(args, obversation_shape, action_shape)
 
-    actor_optimizer = optim.Adam(actor.parameters(), lr=args.learning_rate)
-    critic_optimizer = optim.Adam(
+    target_critic1.load_state_dict(critic1.state_dict())
+    target_critic2.load_state_dict(critic2.state_dict())
+
+    optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
+    optimizer_critic = optim.Adam(
         list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate
     )
+
+    alpha = args.alpha
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
@@ -218,8 +235,7 @@ def main():
             action = Uniform(action_low, action_high).sample().unsqueeze(0)
         else:
             with torch.no_grad():
-                action = actor(state)
-                action += torch.normal(0, actor.action_scale * args.exploration_noise)
+                action, _ = actor(state)
 
         next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
 
@@ -242,21 +258,12 @@ def main():
 
             # Update critic
             with torch.no_grad():
-                clipped_noise = (
-                    torch.clamp(
-                        (torch.randn_like(actions) * args.policy_noise),
-                        -args.noise_clip,
-                        args.noise_clip,
-                    )
-                    * target_actor.action_scale
+                next_state_actions, next_state_log_pi = actor(next_states)
+                critic1_next_target = target_critic1(next_states, next_state_actions).squeeze()
+                critic2_next_target = target_critic2(next_states, next_state_actions).squeeze()
+                min_qf_next_target = (
+                    torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
                 )
-
-                next_state_actions = torch.clamp(
-                    (target_actor(next_states) + clipped_noise), action_low, action_high
-                )
-                critic1_next_target = critic1_target(next_states, next_state_actions).squeeze()
-                critic2_next_target = critic2_target(next_states, next_state_actions).squeeze()
-                min_qf_next_target = torch.min(critic1_next_target, critic2_next_target)
                 next_q_value = rewards + (1.0 - flags) * args.gamma * min_qf_next_target
 
             qf1_a_values = critic1(states, actions).squeeze()
@@ -265,27 +272,28 @@ def main():
             qf2_loss = mse_loss(qf2_a_values, next_q_value)
             critic_loss = qf1_loss + qf2_loss
 
-            critic_optimizer.zero_grad()
+            optimizer_critic.zero_grad()
             critic_loss.backward()
-            critic_optimizer.step()
+            optimizer_critic.step()
 
             # Update actor
             if global_step % args.policy_frequency == 0:
-                actor_loss = -critic1(states, actor(states)).mean()
-                actor_optimizer.zero_grad()
-                actor_loss.backward()
-                actor_optimizer.step()
+                for _ in range(args.policy_frequency):
+                    pi, log_pi = actor(states)
+                    qf1_pi = critic1(states, pi).squeeze()
+                    qf2_pi = critic2(states, pi).squeeze()
+                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
+                    actor_loss = (alpha * log_pi - min_qf_pi).mean()
 
-                # Update the target network
-                for param, target_param in zip(actor.parameters(), target_actor.parameters()):
+                optimizer_actor.zero_grad()
+                actor_loss.backward()
+                optimizer_actor.step()
+
+                for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
-                for param, target_param in zip(critic1.parameters(), critic1_target.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
-                for param, target_param in zip(critic2.parameters(), critic2_target.parameters()):
+                for param, target_param in zip(critic2.parameters(), target_critic2.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
@@ -293,6 +301,20 @@ def main():
                 # Log metrics on Tensorboard
                 writer.add_scalar("update/actor_loss", actor_loss, global_step)
                 writer.add_scalar("update/critic_loss", critic_loss, global_step)
+                writer.add_scalar("debug/qf1_a_values", qf1_a_values.mean(), global_step)
+                writer.add_scalar("debug/qf2_a_values", qf2_a_values.mean(), global_step)
+                writer.add_scalar(
+                    "debug/critic1_next_target", critic1_next_target.mean(), global_step
+                )
+                writer.add_scalar(
+                    "debug/critic2_next_target", critic2_next_target.mean(), global_step
+                )
+                writer.add_scalar("debug/qf1_loss", qf1_loss, global_step)
+                writer.add_scalar("debug/qf2_loss", qf2_loss, global_step)
+                writer.add_scalar(
+                    "debug/min_qf_next_target", min_qf_next_target.mean(), global_step
+                )
+                writer.add_scalar("debug/next_q_value", next_q_value.mean(), global_step)
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
