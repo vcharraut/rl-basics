@@ -5,7 +5,6 @@ import time
 from collections import deque, namedtuple
 from datetime import datetime
 from pathlib import Path
-from warnings import simplefilter
 
 import gymnasium as gym
 import numpy as np
@@ -15,8 +14,6 @@ from torch import nn, optim
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-
-simplefilter(action="ignore", category=DeprecationWarning)
 
 
 def parse_args():
@@ -33,21 +30,20 @@ def parse_args():
     parser.add_argument("--eps_decay", type=int, default=int(1e6))
     parser.add_argument("--learning_start", type=int, default=50000)
     parser.add_argument("--train_frequency", type=int, default=4)
+    parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
 
-    args.device = torch.device("cuda")
-    args.eps_decay = 1000000
+    args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
 
     return args
 
 
 def make_env(env_id, run_dir, capture_video):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
@@ -121,7 +117,6 @@ class ReplayBuffer:
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -129,20 +124,19 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class QNetwork(nn.Module):
     def __init__(self, args, action_shape):
-
         super().__init__()
 
         self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+            nn.Conv2d(4, 32, 8, stride=4),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.Conv2d(32, 64, 4, stride=2),
             nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.Conv2d(64, 64, 3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.Linear(64 * 7 * 7, 512),
             nn.ReLU(),
-            layer_init(nn.Linear(512, action_shape), std=0.01),
+            nn.Linear(512, action_shape),
         )
 
         if args.device.type == "cuda":

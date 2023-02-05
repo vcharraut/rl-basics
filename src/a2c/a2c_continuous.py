@@ -3,7 +3,6 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from warnings import simplefilter
 
 import gymnasium as gym
 import numpy as np
@@ -16,8 +15,6 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
-simplefilter(action="ignore", category=DeprecationWarning)
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -25,8 +22,8 @@ def parse_args():
     parser.add_argument("--total_timesteps", type=int, default=int(1e6))
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--num_steps", type=int, default=2048)
-    parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--learning_rate", type=float, default=7e-4)
+    parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
@@ -37,14 +34,13 @@ def parse_args():
 
     args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
     args.batch_size = int(args.num_envs * args.num_steps)
-    args.num_updates = int(args.total_timesteps // args.num_steps)
+    args.num_updates = int(args.total_timesteps // args.batch_size)
 
     return args
 
 
 def make_env(env_id, idx, run_dir, capture_video):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
         else:
@@ -66,7 +62,6 @@ def make_env(env_id, idx, run_dir, capture_video):
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -74,7 +69,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class ActorCriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
-
         super().__init__()
 
         fc_layer_value = np.prod(obversation_shape)
@@ -93,6 +87,7 @@ class ActorCriticNet(nn.Module):
             fc_layer_value = layer_value
 
         self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
+
         self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
 
         self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
@@ -104,7 +99,6 @@ class ActorCriticNet(nn.Module):
         pass
 
     def get_action(self, state):
-
         action_mean = self.actor_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
         distribution = Normal(action_mean, action_std)
@@ -114,7 +108,6 @@ class ActorCriticNet(nn.Module):
         return action.cpu().numpy()
 
     def get_logprob_value(self, state, action):
-
         action_mean = self.actor_net(state)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
         distribution = Normal(action_mean, action_std)
@@ -189,7 +182,7 @@ def main():
 
         # Generate transitions
         for i in range(args.num_steps):
-            global_step += 1
+            global_step += 1 * args.num_envs
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()

@@ -4,19 +4,16 @@ import time
 from collections import deque, namedtuple
 from datetime import datetime
 from pathlib import Path
-from warnings import simplefilter
 
 import gymnasium as gym
 import numpy as np
 import torch
 import wandb
 from torch import nn, optim
-from torch.distributions import Uniform, Normal
+from torch.distributions import Normal, Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-
-simplefilter(action="ignore", category=DeprecationWarning)
 
 
 def parse_args():
@@ -46,7 +43,6 @@ def parse_args():
 
 def make_env(env_id, run_dir, capture_video):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(

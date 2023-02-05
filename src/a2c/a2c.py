@@ -3,7 +3,6 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from warnings import simplefilter
 
 import gymnasium as gym
 import numpy as np
@@ -15,8 +14,6 @@ from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-
-simplefilter(action="ignore", category=DeprecationWarning)
 
 
 def parse_args():
@@ -37,14 +34,13 @@ def parse_args():
 
     args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
     args.batch_size = int(args.num_envs * args.num_steps)
-    args.num_updates = int(args.total_timesteps // args.num_steps)
+    args.num_updates = int(args.total_timesteps // args.batch_size)
 
     return args
 
 
 def make_env(env_id, idx, run_dir, capture_video):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
         else:
@@ -65,7 +61,6 @@ def make_env(env_id, idx, run_dir, capture_video):
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
@@ -73,7 +68,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class ActorCriticNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape):
-
         super().__init__()
 
         fc_layer_value = np.prod(obversation_shape)
@@ -100,7 +94,6 @@ class ActorCriticNet(nn.Module):
         pass
 
     def get_action(self, state):
-
         actor_value = self.actor_net(state)
         distribution = Categorical(logits=actor_value)
         action = distribution.sample()
@@ -108,7 +101,6 @@ class ActorCriticNet(nn.Module):
         return action.cpu().numpy()
 
     def get_logprob_value(self, state, action):
-
         actor_value = self.actor_net(state)
         distribution = Categorical(logits=actor_value)
         log_prob = distribution.log_prob(action)
@@ -181,7 +173,7 @@ def main():
 
         # Generate transitions
         for i in range(args.num_steps):
-            global_step += 1
+            global_step += 1 * args.num_envs
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
