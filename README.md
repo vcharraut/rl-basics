@@ -17,13 +17,13 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 | [TD3](https://arxiv.org/abs/1802.09477)                | [td3.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/td3/td3.py)                                                                                                                                                                                                       |      |
 | [SAC](https://arxiv.org/abs/1801.01290)                | [sac.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/sac/sac.py)                                                                                                                                                                                                       |      |
 
-# Todo 
+## Todo
 
 - Check Atari perfomances for A2C/PPO/DQN
 - Check A2C perfomances in continuous envs
 - Add Flax support
 
-# Prerequisites
+## Prerequisites
 
 - poetry >= 1.3.0
 - python >= 3.10
@@ -32,7 +32,7 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 - gymnasium >= 0.27.0
 - torch >= 1.13.0
 
-# Installation
+## Installation
 
 Clone the code repo and install the requirements.
 
@@ -43,7 +43,7 @@ cd rl-gym-zoo
 poetry install
 ```
 
-# Usage
+## Usage
 
 ```shell
 poetry shell
@@ -74,16 +74,16 @@ To view logs on Tensorboard:
 poetry run tensorboard --logdir=runs
 ```
 
-# Results
+## Results
 
-## LunarLander-v2
+### LunarLander-v2
 
 ![lunar-lander](img/lunarlander.png)
 
-## HalfChetaah-v4
+### HalfChetaah-v4
 
 ![half-cheetah](img/halfcheetah.png)
 
-# Acknowledgments
+## Acknowledgments
 
 - [CleanRL](https://github.com/vwxyzjn/cleanrl): Some parts of my implementations come directly from the repository, so if you look for a complete and detailed code, you should check it first!
