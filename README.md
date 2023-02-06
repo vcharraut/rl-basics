@@ -17,12 +17,6 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 | [TD3](https://arxiv.org/abs/1802.09477)                | [td3.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/td3/td3.py)                                                                                                                                                                                                       |      |
 | [SAC](https://arxiv.org/abs/1801.01290)                | [sac.py](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/sac/sac.py)                                                                                                                                                                                                       |      |
 
-## Todo
-
-- Check Atari perfomances for A2C/PPO/DQN
-- Check A2C perfomances in continuous envs
-- Add Flax support
-
 ## Prerequisites
 
 - poetry >= 1.3.0
