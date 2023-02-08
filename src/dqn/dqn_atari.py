@@ -18,18 +18,19 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(1e7))
+    parser.add_argument("--env", type=str, default="PongNoFrameskip-v4")
+    parser.add_argument("--total_timesteps", type=int, default=int(5e6))
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--buffer_size", type=int, default=600000)
+    parser.add_argument("--buffer_size", type=int, default=500000)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=5e-3)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
-    parser.add_argument("--eps_decay", type=int, default=int(1e6))
+    parser.add_argument("--eps_decay", type=int, default=int(2e5))
     parser.add_argument("--learning_start", type=int, default=50000)
     parser.add_argument("--train_frequency", type=int, default=4)
+    parser.add_argument("--target_update_frequency", type=int, default=10000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -52,7 +53,7 @@ def make_env(env_id, run_dir, capture_video):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
+        env = gym.wrappers.AtariPreprocessing(env)
         env = gym.wrappers.FrameStack(env, 4)
 
         return env
@@ -61,10 +62,9 @@ def make_env(env_id, run_dir, capture_video):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, obversation_shape, device):
+    def __init__(self, buffer_size, batch_size, device):
         self.buffer = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.obversation_shape = obversation_shape
         self.device = device
 
         self.transition = namedtuple(
@@ -77,41 +77,29 @@ class ReplayBuffer:
 
     def push(self, state, action, reward, flag):
         state = state.to(dtype=torch.uint8).squeeze()
-        self.buffer.append(self.transition(state[-1], action, reward, flag))
-
-    def get_states(self, index_ns):
-        index_s = index_ns - 1
-
-        i_range = range(0, 4)
-        state = torch.stack(
-            [self.buffer[index_s - i].state.to(dtype=torch.float32) for i in i_range]
-        )
-        next_state = torch.stack(
-            [self.buffer[index_ns - i].state.to(dtype=torch.float32) for i in i_range]
-        )
-
-        return state, next_state
+        self.buffer.append(self.transition(state, action, reward, flag))
 
     def sample(self):
-        sample_indices = np.random.choice(range(5, self.size), size=self.batch_size, replace=False)
+        sample_indices = np.random.choice(self.size - 1, size=self.batch_size)
 
         samples = [
             (
-                *self.get_states(index),
+                self.buffer[index].state,
                 self.buffer[index].action,
                 self.buffer[index].reward,
+                self.buffer[index + 1].state,
                 self.buffer[index].flag,
             )
             for index in sample_indices
         ]
 
-        states, next_states, actions, rewards, flags = zip(*samples)
+        states, actions, rewards, next_states, flags = zip(*samples)
 
-        states = torch.stack(states).to(self.device)
-        next_states = torch.stack(next_states).to(self.device)
-        actions = torch.tensor(actions).to(self.device).unsqueeze(-1)
-        rewards = torch.tensor(rewards).to(self.device)
-        flags = torch.tensor(flags).to(self.device)
+        states = torch.stack(states).to(self.device).float()
+        next_states = torch.stack(next_states).to(self.device).float()
+        actions = torch.cat(actions).to(self.device).type(torch.int64).unsqueeze(-1)
+        rewards = torch.cat(rewards).to(self.device)
+        flags = torch.cat(flags).to(self.device)
 
         return states, actions, rewards, next_states, flags
 
@@ -187,7 +175,6 @@ def main():
     env = gym.vector.SyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
 
     # Metadata about the environment
-    obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
     # Create the policy networks
@@ -198,7 +185,7 @@ def main():
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, args.device)
 
     # Generate the initial state of the environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
@@ -244,6 +231,7 @@ def main():
                 td_predict = policy_net(states).gather(1, actions).squeeze()
 
                 with torch.no_grad():
+                    # Double Q-Learning
                     action_by_qvalue = policy_net(next_states).argmax(1).unsqueeze(-1)
                     max_q_target = target_net(next_states).gather(1, action_by_qvalue).squeeze()
 
@@ -256,13 +244,16 @@ def main():
                 optimizer.step()
 
                 # Update target network
-                for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
+                # for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
+                #     target_param.data.copy_(
+                #         args.tau * param.data + (1 - args.tau) * target_param.data
+                #     )
 
                 # Log metrics on Tensorboard
                 writer.add_scalar("update/loss", loss, global_step)
+
+            if not global_step % args.target_update_frequency:
+                target_net.load_state_dict(policy_net.state_dict())
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
