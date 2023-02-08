@@ -66,10 +66,9 @@ def make_env(env_id, run_dir, capture_video):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, obversation_shape, device):
+    def __init__(self, buffer_size, batch_size, device):
         self.buffer = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.obversation_shape = obversation_shape
         self.device = device
 
         self.transition = namedtuple(
@@ -202,7 +201,7 @@ def main():
     )
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, args.device)
 
     # Generate the initial state of the environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
