@@ -18,8 +18,8 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="BreakoutNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(1e7))
+    parser.add_argument("--env", type=str, default="PongNoFrameskip-v4")
+    parser.add_argument("--total_timesteps", type=int, default=int(5e6))
     parser.add_argument("--num_envs", type=int, default=8)
     parser.add_argument("--num_steps", type=int, default=128)
     parser.add_argument("--num_minibatches", type=int, default=4)
@@ -52,7 +52,7 @@ def make_env(env_id, idx, run_dir, capture_video):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
+        env = gym.wrappers.AtariPreprocessing(env)
         env = gym.wrappers.FrameStack(env, 4)
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
