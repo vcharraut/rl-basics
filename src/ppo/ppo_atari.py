@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--eps_clip", type=float, default=0.1)
     parser.add_argument("--value_factor", type=float, default=0.5)
     parser.add_argument("--entropy_factor", type=float, default=0.01)
+    parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -280,7 +281,7 @@ def main():
 
                 optimizer.zero_grad()
                 loss.backward()
-                clip_grad_norm_(policy_net.parameters(), 0.5)
+                clip_grad_norm_(policy_net.parameters(), args.clip_grad_norm)
                 optimizer.step()
 
         # Annealing learning rate
