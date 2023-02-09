@@ -64,7 +64,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, args, action_shape):
+    def __init__(self, action_shape):
         super().__init__()
 
         self.network = nn.Sequential(
@@ -147,7 +147,7 @@ def main():
     action_shape = envs.single_action_space.n
 
     # Create the policy network
-    policy_net = ActorCriticNet(args, action_shape)
+    policy_net = ActorCriticNet(action_shape)
 
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
