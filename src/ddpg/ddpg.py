@@ -246,7 +246,7 @@ def main():
             optimizer_critic.step()
 
             # Update actor
-            if global_step % args.policy_frequency == 0:
+            if not global_step % args.policy_frequency:
                 actor_loss = -critic(states, actor(states)).mean()
                 optimizer_actor.zero_grad()
                 actor_loss.backward()
@@ -263,8 +263,8 @@ def main():
                     )
 
                 # Log metrics on Tensorboard
-                writer.add_scalar("update/actor_loss", actor_loss, global_step)
-                writer.add_scalar("update/critic_loss", critic_loss, global_step)
+                writer.add_scalar("train/actor_loss", actor_loss, global_step)
+                writer.add_scalar("train/critic_loss", critic_loss, global_step)
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step

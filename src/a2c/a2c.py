@@ -20,11 +20,13 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="LunarLander-v2")
     parser.add_argument("--total_timesteps", type=int, default=int(5e5))
-    parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--num_steps", type=int, default=2048)
-    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--num_envs", type=int, default=16)
+    parser.add_argument("--num_steps", type=int, default=5)
+    parser.add_argument("--learning_rate", type=float, default=7e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--value_factor", type=float, default=0.5)
+    parser.add_argument("--entropy_factor", type=float, default=0.01)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -90,24 +92,23 @@ class ActorCriticNet(nn.Module):
         if args.device.type == "cuda":
             self.cuda()
 
-    def forward(self):
-        pass
-
-    def get_action(self, state):
+    def forward(self, state):
         actor_value = self.actor_net(state)
         distribution = Categorical(logits=actor_value)
         action = distribution.sample()
 
         return action.cpu().numpy()
 
-    def get_logprob_value(self, state, action):
+    def evaluate(self, state, action):
         actor_value = self.actor_net(state)
         distribution = Categorical(logits=actor_value)
+
         log_prob = distribution.log_prob(action)
+        dist_entropy = distribution.entropy()
 
         critic_value = self.critic_net(state).squeeze()
 
-        return log_prob, critic_value
+        return log_prob, critic_value, dist_entropy
 
 
 def main():
@@ -177,7 +178,7 @@ def main():
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action = policy_net.get_action(state_tensor)
+                action = policy_net(state_tensor)
 
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
@@ -216,22 +217,18 @@ def main():
         actions_batch = actions.flatten(0, 1)
         td_target_batch = td_target.reshape(-1)
 
-        # Shuffle batch
-        batch_indexes = torch.randperm(args.batch_size)
-
-        states_batch = states_batch[batch_indexes]
-        actions_batch = actions_batch[batch_indexes]
-        td_target_batch = td_target_batch[batch_indexes]
-
         # Update policy
-        log_probs, td_predict = policy_net.get_logprob_value(states_batch, actions_batch)
+        log_probs, td_predict, dist_entropy = policy_net.evaluate(states_batch, actions_batch)
 
         advantages = td_target_batch - td_predict
 
-        actor_loss = (-log_probs * advantages).mean()
-        critic_loss = mse_loss(td_target_batch, td_predict)
+        actor_loss = (-log_probs * advantages.detach()).mean()
 
-        loss = actor_loss + critic_loss
+        critic_loss = args.value_factor * mse_loss(td_target_batch, td_predict)
+
+        entropy_bonus = args.entropy_factor * dist_entropy.mean()
+
+        loss = actor_loss + critic_loss - entropy_bonus
 
         optimizer.zero_grad()
         loss.backward()
@@ -239,8 +236,8 @@ def main():
         optimizer.step()
 
         # Log metrics on Tensorboard
-        writer.add_scalar("update/actor_loss", actor_loss, global_step)
-        writer.add_scalar("update/critic_loss", critic_loss, global_step)
+        writer.add_scalar("train/actor_loss", actor_loss, global_step)
+        writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )

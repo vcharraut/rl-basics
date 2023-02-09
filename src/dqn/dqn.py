@@ -202,7 +202,7 @@ def main():
 
         # Update policy
         if global_step > args.learning_start:
-            if global_step % args.train_frequency == 0:
+            if not global_step % args.train_frequency:
                 states, actions, rewards, next_states, flags = replay_buffer.sample()
 
                 td_predict = policy_net(states).gather(1, actions).squeeze()
@@ -227,7 +227,7 @@ def main():
                     )
 
                 # Log metrics on Tensorboard
-                writer.add_scalar("update/loss", loss, global_step)
+                writer.add_scalar("train/loss", loss, global_step)
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step

@@ -272,7 +272,7 @@ def main():
             optimizer_critic.step()
 
             # Update actor
-            if global_step % args.policy_frequency == 0:
+            if not global_step % args.policy_frequency:
                 for _ in range(args.policy_frequency):
                     pi, log_pi = actor(states)
                     qf1_pi = critic1(states, pi).squeeze()
@@ -294,22 +294,22 @@ def main():
                     )
 
                 # Log metrics on Tensorboard
-                writer.add_scalar("update/actor_loss", actor_loss, global_step)
-                writer.add_scalar("update/critic_loss", critic_loss, global_step)
-                writer.add_scalar("debug/qf1_a_values", qf1_a_values.mean(), global_step)
-                writer.add_scalar("debug/qf2_a_values", qf2_a_values.mean(), global_step)
+                writer.add_scalar("train/actor_loss", actor_loss, global_step)
+                writer.add_scalar("train/critic_loss", critic_loss, global_step)
+                writer.add_scalar("train/qf1_a_values", qf1_a_values.mean(), global_step)
+                writer.add_scalar("train/qf2_a_values", qf2_a_values.mean(), global_step)
                 writer.add_scalar(
-                    "debug/critic1_next_target", critic1_next_target.mean(), global_step
+                    "train/critic1_next_target", critic1_next_target.mean(), global_step
                 )
                 writer.add_scalar(
-                    "debug/critic2_next_target", critic2_next_target.mean(), global_step
+                    "train/critic2_next_target", critic2_next_target.mean(), global_step
                 )
-                writer.add_scalar("debug/qf1_loss", qf1_loss, global_step)
-                writer.add_scalar("debug/qf2_loss", qf2_loss, global_step)
+                writer.add_scalar("train/qf1_loss", qf1_loss, global_step)
+                writer.add_scalar("train/qf2_loss", qf2_loss, global_step)
                 writer.add_scalar(
-                    "debug/min_qf_next_target", min_qf_next_target.mean(), global_step
+                    "train/min_qf_next_target", min_qf_next_target.mean(), global_step
                 )
-                writer.add_scalar("debug/next_q_value", next_q_value.mean(), global_step)
+                writer.add_scalar("train/next_q_value", next_q_value.mean(), global_step)
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step

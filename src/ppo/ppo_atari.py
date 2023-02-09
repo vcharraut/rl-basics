@@ -91,10 +91,7 @@ class ActorCriticNet(nn.Module):
         if args.device.type == "cuda":
             self.cuda()
 
-    def forward(self):
-        pass
-
-    def get_action_value(self, state, action=None):
+    def forward(self, state, action=None):
         output = self.network(state)
         actor_value = self.actor_net(output)
         distribution = Categorical(logits=actor_value)
@@ -109,7 +106,7 @@ class ActorCriticNet(nn.Module):
 
         return action.cpu().numpy(), log_prob, critic_value, dist_entropy
 
-    def get_value(self, state):
+    def critic(self, state):
         output = self.network(state)
         return self.critic_net(output)
 
@@ -186,7 +183,7 @@ def main():
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = policy_net.get_action_value(state_tensor)
+                action, log_prob, state_value, _ = policy_net(state_tensor)
 
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
@@ -213,7 +210,7 @@ def main():
         # Compute values with GAE
         with torch.no_grad():
             next_state_tensor = torch.from_numpy(next_state).to(args.device).float()
-            next_state_value = policy_net.get_value(next_state_tensor).squeeze(-1)
+            next_state_value = policy_net.critic(next_state_tensor).squeeze(-1)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
@@ -290,11 +287,11 @@ def main():
         scheduler.step()
 
         # Log metrics on Tensorboard
-        writer.add_scalar("update/actor_loss", actor_loss, global_step)
-        writer.add_scalar("update/critic_loss", critic_loss, global_step)
-        writer.add_scalar("debug/old_approx_kl", old_approx_kl, global_step)
-        writer.add_scalar("debug/approx_kl", approx_kl, global_step)
-        writer.add_scalar("debug/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("train/actor_loss", actor_loss, global_step)
+        writer.add_scalar("train/critic_loss", critic_loss, global_step)
+        writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
+        writer.add_scalar("train/approx_kl", approx_kl, global_step)
+        writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )
