@@ -98,22 +98,30 @@ class ActorCriticNet(nn.Module):
         if args.device.type == "cuda":
             self.cuda()
 
-    def forward(self, state, action=None):
+    def forward(self, state):
         actor_value = self.actor_net(state)
         distribution = Categorical(logits=actor_value)
 
-        if action is None:
-            action = distribution.sample()
-
+        action = distribution.sample()
         log_prob = distribution.log_prob(action)
-        dist_entropy = distribution.entropy()
 
         critic_value = self.critic_net(state).squeeze()
 
-        return action.cpu().numpy(), log_prob, critic_value, dist_entropy
+        return action.cpu().numpy(), log_prob, critic_value
+
+    def evaluate(self, states, actions):
+        actor_value = self.actor_net(states)
+        distribution = Categorical(logits=actor_value)
+
+        log_probs = distribution.log_prob(actions)
+        dist_entropy = distribution.entropy()
+
+        critic_values = self.critic_net(states).squeeze()
+
+        return log_probs, critic_values, dist_entropy
 
     def critic(self, state):
-        return self.critic_net(state)
+        return self.critic_net(state).squeeze(-1)
 
 
 def main():
@@ -188,7 +196,7 @@ def main():
 
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value, _ = policy_net(state_tensor)
+                action, log_prob, state_value = policy_net(state_tensor)
 
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
@@ -215,7 +223,7 @@ def main():
         # Compute values with GAE
         with torch.no_grad():
             next_state_tensor = torch.from_numpy(next_state).to(args.device).float()
-            next_state_value = policy_net.critic(next_state_tensor).squeeze(-1)
+            next_state_value = policy_net.critic(next_state_tensor)
 
         advantages = torch.zeros(rewards.size()).to(args.device)
         adv = torch.zeros(rewards.size(1)).to(args.device)
@@ -256,7 +264,7 @@ def main():
                 end = start + args.minibatch_size
                 index = batch_indexes[start:end]
 
-                _, new_log_probs, td_predict, dist_entropy = policy_net.get_action_value(
+                new_log_probs, td_predict, dist_entropy = policy_net.evaluate(
                     states_batch[index], actions_batch[index]
                 )
 

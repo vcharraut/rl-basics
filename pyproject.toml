@@ -9,7 +9,6 @@ packages = [{include = "rl_gym_zoo"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-box2d-py = "2.3.5"
 numpy = "^1.24.0"
 torch = "^1.13.0"
 flax = "^0.6.3"
@@ -22,12 +21,6 @@ black = "^22.12.0"
 
 [tool.poetry.group.atari.dependencies]
 autorom = {extras = ["accept-rom-license"], version = "^0.5.0"}
-
-[tool.poetry.group.profile]
-optional = true
-
-[tool.poetry.group.profile.dependencies]
-snakeviz = "^2.1.1"
 
 [tool.black]
 line-length = 100
