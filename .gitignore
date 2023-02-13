@@ -4,3 +4,4 @@ runs/
 wandb/
 
 poetry.lock
+benchmark.yaml
