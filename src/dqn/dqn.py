@@ -9,26 +9,28 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+import wandb
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total_timesteps", type=int, default=500000)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--buffer_size", type=int, default=10000)
+    parser.add_argument("--total_timesteps", type=int, default=500_000)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--buffer_size", type=int, default=25_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=5e-3)
+    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
-    parser.add_argument("--learning_start", type=int, default=10000)
+    parser.add_argument("--eps_decay", type=int, default=50_000)
+    parser.add_argument("--learning_start", type=int, default=10_000)
     parser.add_argument("--train_frequency", type=int, default=10)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
@@ -55,7 +57,7 @@ def make_env(env_id, run_dir, capture_video):
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=0.99)
+        env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
