@@ -1,7 +1,6 @@
 .venv/
-runs/
 .vscode/
+runs/
+wandb/
 
-*.pt
 poetry.lock
-MUJOCO_LOG.TXT
