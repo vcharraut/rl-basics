@@ -19,14 +19,14 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total_timesteps", type=int, default=int(5e5))
-    parser.add_argument("--num_envs", type=int, default=16)
-    parser.add_argument("--num_steps", type=int, default=5)
+    parser.add_argument("--total_timesteps", type=int, default=500_000)
+    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--num_steps", type=int, default=512)
     parser.add_argument("--learning_rate", type=float, default=7e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--value_factor", type=float, default=0.5)
-    parser.add_argument("--entropy_factor", type=float, default=0.01)
+    parser.add_argument("--value_coef", type=float, default=0.5)
+    parser.add_argument("--entropy_coef", type=float, default=0.01)
     parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -50,7 +50,7 @@ def make_env(env_id, idx, run_dir, capture_video):
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=0.99)
+        env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
@@ -219,10 +219,10 @@ def main():
         advantages = td_target_batch - td_predict
 
         actor_loss = (-log_probs * advantages.detach()).mean()
-        critic_loss = mse_loss(td_target_batch, td_predict) * args.value_factor
-        entropy_bonus = dist_entropy.mean() * args.entropy_factor
+        critic_loss = mse_loss(td_target_batch, td_predict)
+        entropy_bonus = dist_entropy.mean()
 
-        loss = actor_loss + critic_loss - entropy_bonus
+        loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 
         optimizer.zero_grad()
         loss.backward()
