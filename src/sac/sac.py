@@ -14,8 +14,6 @@ from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
-import wandb
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -166,6 +164,8 @@ def main():
     )
 
     if args.wandb:
+        import wandb
+
         wandb.init(
             project=args.env,
             name=algo_name,
