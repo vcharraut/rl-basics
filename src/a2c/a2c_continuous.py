@@ -7,13 +7,14 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.distributions import Normal
 from torch.nn.functional import mse_loss
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
+
+import wandb
 
 
 def parse_args():

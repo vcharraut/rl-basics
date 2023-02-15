@@ -7,7 +7,6 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.distributions import Categorical
 from torch.nn.functional import mse_loss
@@ -15,17 +14,19 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+import wandb
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="PongNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(5e6))
+    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
     parser.add_argument("--num_envs", type=int, default=16)
     parser.add_argument("--num_steps", type=int, default=5)
     parser.add_argument("--learning_rate", type=float, default=2.5e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--value_factor", type=float, default=0.5)
-    parser.add_argument("--entropy_factor", type=float, default=0.01)
+    parser.add_argument("--value_coef", type=float, default=0.5)
+    parser.add_argument("--entropy_coef", type=float, default=0.01)
     parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -216,10 +217,10 @@ def main():
         advantages = td_target_batch - td_predict
 
         actor_loss = (-log_probs * advantages.detach()).mean()
-        critic_loss = mse_loss(td_target_batch, td_predict) * args.value_factor
-        entropy_bonus = dist_entropy.mean() * args.entropy_factor
+        critic_loss = mse_loss(td_target_batch, td_predict)
+        entropy_bonus = dist_entropy.mean()
 
-        loss = actor_loss + critic_loss - entropy_bonus
+        loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 
         optimizer.zero_grad()
         loss.backward()
