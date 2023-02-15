@@ -8,26 +8,27 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.distributions import Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+import wandb
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="HalfCheetah-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(1e6))
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--buffer_size", type=int, default=int(1e5))
+    parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--exploration_noise", type=float, default=0.1)
-    parser.add_argument("--learning_start", type=int, default=25000)
+    parser.add_argument("--learning_start", type=int, default=25_000)
     parser.add_argument("--policy_frequency", type=int, default=4)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
@@ -55,7 +56,7 @@ def make_env(env_id, run_dir, capture_video):
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=0.99)
+        env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
@@ -236,9 +237,7 @@ def main():
                 critic_next_target = target_critic(next_states, next_state_actions).squeeze()
 
             td_target = rewards + (1.0 - flags) * args.gamma * critic_next_target
-
             td_predict = critic(states, actions).squeeze()
-
             critic_loss = mse_loss(td_predict, td_target)
 
             optimizer_critic.zero_grad()

@@ -9,28 +9,29 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+import wandb
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="PongNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(5e6))
+    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--buffer_size", type=int, default=500000)
+    parser.add_argument("--buffer_size", type=int, default=500_000)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=5e-3)
+    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
-    parser.add_argument("--eps_decay", type=int, default=int(2e5))
-    parser.add_argument("--learning_start", type=int, default=50000)
+    parser.add_argument("--eps_decay", type=int, default=200_000)
+    parser.add_argument("--learning_start", type=int, default=50_000)
     parser.add_argument("--train_frequency", type=int, default=4)
-    parser.add_argument("--target_update_frequency", type=int, default=10000)
+    parser.add_argument("--target_update_frequency", type=int, default=10_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -244,16 +245,16 @@ def main():
                 optimizer.step()
 
                 # Update target network
-                # for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
-                #     target_param.data.copy_(
-                #         args.tau * param.data + (1 - args.tau) * target_param.data
-                #     )
+                for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
+                    target_param.data.copy_(
+                        args.tau * param.data + (1 - args.tau) * target_param.data
+                    )
 
                 # Log metrics on Tensorboard
                 writer.add_scalar("train/loss", loss, global_step)
 
-            if not global_step % args.target_update_frequency:
-                target_net.load_state_dict(policy_net.state_dict())
+            # if not global_step % args.target_update_frequency:
+            #     target_net.load_state_dict(policy_net.state_dict())
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step

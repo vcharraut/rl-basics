@@ -7,7 +7,6 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from torch import nn, optim
 from torch.distributions import Normal
 from torch.nn.functional import mse_loss
@@ -15,11 +14,13 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
+import wandb
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="HalfCheetah-v4")
-    parser.add_argument("--total_timesteps", type=int, default=int(1e6))
+    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--num_steps", type=int, default=2048)
     parser.add_argument("--num_minibatches", type=int, default=32)
@@ -29,8 +30,8 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
     parser.add_argument("--eps_clip", type=float, default=0.2)
-    parser.add_argument("--value_factor", type=float, default=0.5)
-    parser.add_argument("--entropy_factor", type=float, default=0.01)
+    parser.add_argument("--value_coef", type=float, default=0.5)
+    parser.add_argument("--entropy_coef", type=float, default=0.01)
     parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
@@ -58,7 +59,7 @@ def make_env(env_id, idx, run_dir, capture_video):
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=0.99)
+        env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         if capture_video and idx == 0:
             env = gym.wrappers.RecordVideo(
@@ -290,12 +291,12 @@ def main():
                 )
 
                 actor_loss = -torch.min(surr1, surr2).mean()
+                critic_loss = mse_loss(td_predict, td_target_batch[index])
+                entropy_bonus = dist_entropy.mean()
 
-                critic_loss = args.value_factor * mse_loss(td_predict, td_target_batch[index])
-
-                entropy_bonus = args.entropy_factor * dist_entropy.mean()
-
-                loss = actor_loss + critic_loss - entropy_bonus
+                loss = (
+                    actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
+                )
 
                 optimizer.zero_grad()
                 loss.backward()
