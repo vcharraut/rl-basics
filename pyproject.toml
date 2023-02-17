@@ -1,31 +1,32 @@
-[tool.poetry]
-name = "rl-gym-zoo"
-version = "0.1.0"
-description = ""
-authors = ["Valentin Canete <valentin.canete@gmail.com>"]
-license = "MIT"
-readme = "README.md"
-packages = [{include = "rl_gym_zoo"}]
-
-[tool.poetry.dependencies]
-python = "^3.10"
-numpy = "^1.24.0"
-torch = "^1.13.0"
-flax = "^0.6.3"
-gymnasium = {extras = ["all"], version = "^0.27.0"}
-tensorboard = "^2.11.0"
-wandb = "^0.13.9"
-
-[tool.poetry.group.dev.dependencies]
-black = "^22.12.0"
-
-[tool.poetry.group.atari.dependencies]
-autorom = {extras = ["accept-rom-license"], version = "^0.5.0"}
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core"]
 
 [tool.black]
 line-length = 100
 
+[tool.poetry]
+authors = ["Valentin Canete <valentin.canete@gmail.com>"]
+description = ""
+license = "MIT"
+name = "rl-gym-zoo"
+readme = "README.md"
+version = "0.1.0"
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.poetry.dependencies]
+flax = "^0.6.3"
+gymnasium = {extras = ["all"], version = "^0.27.0"}
+numpy = "^1.24.0"
+python = "^3.10"
+torch = "^1.13.0"
+
+[tool.poetry.group.atari.dependencies]
+autorom = {extras = ["accept-rom-license"], version = "^0.5.0"}
+
+[tool.poetry.group.dev.dependencies]
+black = "^22.12.0"
+pre-commit = "^3.0.4"
+
+[tool.poetry.group.viz.dependencies]
+tensorboard = "^2.11.0"
+wandb = "^0.13.9"
