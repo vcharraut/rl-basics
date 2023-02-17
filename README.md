@@ -22,10 +22,6 @@ Every Gymansium environments are supported, including MuJoCo and Atari.
 - poetry >= 1.3.0
 - python >= 3.10
 
-- numpy >= 1.24.0
-- gymnasium >= 0.27.0
-- torch >= 1.13.0
-
 ## Installation
 
 Clone the code repo and install the requirements.
@@ -36,6 +32,8 @@ cd rl-gym-zoo
 
 poetry install
 ```
+
+⚠️ **Important**: The package `box2d-py` doesn't install properly with poetry. You should run `pip install box2d-py=2.3.5` before `poetry update` to make sure everything install correctly.
 
 ## Usage
 
