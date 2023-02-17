@@ -1,6 +1,6 @@
 # rl-gym-zoo
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+ [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 
@@ -33,7 +33,9 @@ cd rl-gym-zoo
 poetry update
 ```
 
-⚠️ **Important**: The package `box2d-py` doesn't install properly with poetry. You should run `pip install box2d-py=2.3.5` before `poetry update` to make sure everything install correctly.
+⚠️ **Important**: The package `box2d-py` doesn't install properly with poetry.
+
+You should run `pip install box2d-py=2.3.5` before `poetry update` to make sure everything install correctly.
 
 ## Usage
 
