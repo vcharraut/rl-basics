@@ -183,7 +183,7 @@ if __name__ == "__main__":
             if "final_info" not in infos:
                 continue
 
-            # Log episode reward
+            # Log episodic return and length
             for info in infos["final_info"]:
                 if info is None:
                     continue
@@ -227,7 +227,7 @@ if __name__ == "__main__":
         clip_grad_norm_(policy_net.parameters(), args.clip_grad_norm)
         optimizer.step()
 
-        # Log metrics on Tensorboard
+        # Log training metrics
         writer.add_scalar("train/actor_loss", actor_loss, global_step)
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar(
