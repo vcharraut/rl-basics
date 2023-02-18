@@ -17,11 +17,11 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="LunarLander-v2")
-    parser.add_argument("--total_timesteps", type=int, default=500_000)
+    parser.add_argument("--env_id", type=str, default="LunarLander-v2")
+    parser.add_argument("--total_timesteps", type=int, default=50_000)
     parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--num_steps", type=int, default=512)
-    parser.add_argument("--learning_rate", type=float, default=7e-4)
+    parser.add_argument("--num_steps", type=int, default=128)
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
@@ -39,22 +39,17 @@ def parse_args():
     return args
 
 
-def make_env(env_id, idx, run_dir, capture_video):
+def make_env(env_id):
     def thunk():
-        if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
-        else:
-            env = gym.make(env_id)
+
+        env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(
-                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
-            )
+
         return env
 
     return thunk
@@ -111,24 +106,19 @@ def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    # These variables are specific to the repo "rl-gym-zoo"
+    # You should change them if you are just copy/paste the code
     algo_name = Path(__file__).stem.split("_")[0].upper()
     run_dir = Path(
-        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env_id}__{algo_name}__{date}"
     )
 
     if args.wandb:
         import wandb
 
-        wandb.init(
-            project=args.env,
-            name=algo_name,
-            sync_tensorboard=True,
-            config=vars(args),
-            dir=run_dir,
-            save_code=True,
-        )
+        wandb.init(project=args.env_id, name=algo_name, sync_tensorboard=True, config=vars(args))
 
-    # Create writer for Tensorboard
+    # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -136,50 +126,53 @@ def main():
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Seeding
+    # Set seed for reproducibility
     if args.seed > 0:
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
     # Create vectorized environment(s)
-    envs = gym.vector.AsyncVectorEnv(
-        [make_env(args.env, i, run_dir, args.capture_video) for i in range(args.num_envs)]
-    )
+    envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
     obversation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
 
-    # Create the policy network
+    # Create policy network and optimizer
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
-
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
-    # Initialize batch variables
+    # Create buffers
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape)
     actions = torch.zeros((args.num_steps, args.num_envs))
     rewards = torch.zeros((args.num_steps, args.num_envs))
     flags = torch.zeros((args.num_steps, args.num_envs))
 
-    # Generate the initial state of the environment
+    log_episodic_returns = []
+
+    # Initialize environment
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     global_step = 0
     start_time = time.process_time()
 
+    # Main loop
     for _ in tqdm(range(args.num_updates)):
 
-        # Generate transitions
         for i in range(args.num_steps):
+            # Update global step
             global_step += 1 * args.num_envs
 
             with torch.no_grad():
+                # Get action
                 state_tensor = torch.from_numpy(state).float()
                 action = policy_net(state_tensor)
 
+            # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
+            # Store transition
             states[i] = state_tensor
             actions[i] = torch.from_numpy(action)
             rewards[i] = torch.from_numpy(reward)
@@ -190,18 +183,21 @@ def main():
             if "final_info" not in infos:
                 continue
 
-            # Log episode metrics on Tensorboard
+            # Log episode reward
             for info in infos["final_info"]:
                 if info is None:
                     continue
 
+                log_episodic_returns.append(info["episode"]["r"])
                 writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
                 writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
 
-        # Compute values
+                break
+
         td_target = torch.zeros(rewards.size())
         gain = torch.zeros(rewards.size(1))
 
+        # Compute TD target
         for i in reversed(range(td_target.size(0))):
             terminal = 1.0 - flags[i]
             gain = rewards[i] + gain * args.gamma * terminal
@@ -215,7 +211,7 @@ def main():
         actions_batch = actions.flatten(0, 1)
         td_target_batch = td_target.reshape(-1)
 
-        # Update policy
+        # Compute losses
         log_probs, td_predict, dist_entropy = policy_net.evaluate(states_batch, actions_batch)
         advantages = td_target_batch - td_predict
 
@@ -225,6 +221,7 @@ def main():
 
         loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 
+        # Update policy network
         optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(policy_net.parameters(), args.clip_grad_norm)
@@ -237,8 +234,36 @@ def main():
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )
 
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
+    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
+    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
+
+    # Close the environment
     envs.close()
     writer.close()
+    if args.wandb:
+        wandb.finish()
+
+    # Capture video of the policy
+    if args.capture_video:
+        with gym.make(args.env_id, render_mode="rgb_array") as env:
+            env = gym.wrappers.RecordVideo(
+                env=env,
+                video_folder=f"{run_dir}/videos/",
+                episode_trigger=lambda x: x,
+                disable_logger=True,
+            )
+
+            for _ in range(10):
+                state, _ = env.reset()
+                terminated = False
+                truncated = False
+
+                while not terminated or not truncated:
+                    action = policy_net(torch.from_numpy(state).float())
+                    state, _, terminated, truncated, _ = env.step(action)
 
 
 if __name__ == "__main__":
