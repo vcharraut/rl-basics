@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="HalfCheetah-v4")
+    parser.add_argument("--env_id", type=str, default="HalfCheetah-v4")
     parser.add_argument("--total_timesteps", type=int, default=1_000_000)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--buffer_size", type=int, default=100_000)
@@ -40,15 +40,10 @@ def parse_args():
     return args
 
 
-def make_env(env_id, run_dir, capture_video):
+def make_env(env_id):
     def thunk():
-        if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(
-                env=env, video_folder=f"{run_dir}/videos/", disable_logger=True
-            )
-        else:
-            env = gym.make(env_id)
+
+        env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
 
         return env
@@ -81,10 +76,6 @@ class ReplayBuffer:
         return states, actions, rewards, next_states, flags
 
 
-LOG_STD_MAX = 2
-LOG_STD_MIN = -5
-
-
 class ActorNet(nn.Module):
     def __init__(self, args, obversation_shape, action_shape, action_low, action_high):
         super().__init__()
@@ -102,7 +93,7 @@ class ActorNet(nn.Module):
         self.fc_mean = nn.Linear(fc_layer_value, action_shape)
         self.fc_logstd = nn.Linear(fc_layer_value, action_shape)
 
-        # action rescaling
+        # Scale and bias the output of the network to match the action space
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
         self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
 
@@ -110,6 +101,9 @@ class ActorNet(nn.Module):
             self.cuda()
 
     def forward(self, state):
+        LOG_STD_MAX = 2
+        LOG_STD_MIN = -5
+
         output = self.network(state)
 
         mean = self.fc_mean(output)
@@ -154,28 +148,24 @@ class CriticNet(nn.Module):
         return self.network(torch.cat([state, action], 1))
 
 
-def main():
+if __name__ == "__main__":
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M"))
+    # These variables are specific to the repo "rl-gym-zoo"
+    # You should change them if you are just copy/paste the code
     algo_name = Path(__file__).stem.split("_")[0].upper()
     run_dir = Path(
-        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env}__{algo_name}__{date}"
+        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env_id}__{algo_name}__{date}"
     )
 
+    # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
 
-        wandb.init(
-            project=args.env,
-            name=algo_name,
-            sync_tensorboard=True,
-            config=vars(args),
-            dir=run_dir,
-            save_code=True,
-        )
+        wandb.init(project=args.env_id, name=algo_name, sync_tensorboard=True, config=vars(args))
 
-    # Create writer for Tensorboard
+    # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
@@ -183,14 +173,14 @@ def main():
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Seeding
+    # Set seed for reproducibility
     if args.seed > 0:
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
     # Create vectorized environment
-    env = gym.vector.SyncVectorEnv([make_env(args.env, run_dir, args.capture_video)])
+    env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
     # Metadata about the environment
     obversation_shape = env.single_observation_space.shape
@@ -198,7 +188,7 @@ def main():
     action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
     action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
 
-    # Create the policy networks
+    # Create the networks and the optimizer
     actor = ActorNet(args, obversation_shape, action_shape, action_low, action_high)
     critic1 = CriticNet(args, obversation_shape, action_shape)
     critic2 = CriticNet(args, obversation_shape, action_shape)
@@ -219,12 +209,15 @@ def main():
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, args.device)
 
-    # Generate the initial state of the environment
+    # Initialize environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
     state = torch.from_numpy(state).to(args.device).float()
 
+    log_episodic_returns = []
+
     start_time = time.process_time()
 
+    # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
 
         if global_step < args.learning_start:
@@ -233,23 +226,30 @@ def main():
             with torch.no_grad():
                 action, _ = actor(state)
 
+        # Perform action
         next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
 
+        # Convert transition to torch tensors
         next_state = torch.from_numpy(next_state).to(args.device).float()
         reward = torch.from_numpy(reward).to(args.device).float()
         flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device).float()
 
+        # Store transition in the replay buffer
         replay_buffer.push(state, action, reward, next_state, flag)
 
         state = next_state
 
+        # Log episodic return and length
         if "final_info" in infos:
             info = infos["final_info"][0]
+
+            log_episodic_returns.append(info["episode"]["r"])
             writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
             writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
 
-        # Update policy
+        # Perform training step
         if global_step > args.learning_start:
+            # Sample a batch from the replay buffer
             states, actions, rewards, next_states, flags = replay_buffer.sample()
 
             # Update critic
@@ -285,6 +285,7 @@ def main():
                 actor_loss.backward()
                 optimizer_actor.step()
 
+                # Update the target network (soft update)
                 for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
                     target_param.data.copy_(
                         args.tau * param.data + (1 - args.tau) * target_param.data
@@ -294,7 +295,7 @@ def main():
                         args.tau * param.data + (1 - args.tau) * target_param.data
                     )
 
-                # Log metrics on Tensorboard
+                # Log training metrics
                 writer.add_scalar("train/actor_loss", actor_loss, global_step)
                 writer.add_scalar("train/critic_loss", critic_loss, global_step)
                 writer.add_scalar("train/qf1_a_values", qf1_a_values.mean(), global_step)
@@ -316,9 +317,34 @@ def main():
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
         )
 
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
+    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
+    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
+
+    # Close the environment
     env.close()
     writer.close()
+    if args.wandb:
+        wandb.finish()
 
+    # Capture video of the policy
+    if args.capture_video:
+        with gym.make(args.env_id, render_mode="rgb_array") as env:
+            env = gym.wrappers.RecordVideo(
+                env=env,
+                video_folder=f"{run_dir}/videos/",
+                episode_trigger=lambda x: x,
+                disable_logger=True,
+            )
 
-if __name__ == "__main__":
-    main()
+            for _ in range(10):
+                state, _ = env.reset()
+                terminated = False
+                truncated = False
+
+                while not terminated or not truncated:
+                    action = actor(state)
+                    action += torch.normal(0, actor.action_scale * args.exploration_noise)
+                    state, _, terminated, truncated, _ = env.step(action)
