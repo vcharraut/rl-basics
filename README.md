@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
+[![CodeFactor](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo/badge)](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo)
 
 The goal of this repository is to implement popular RL algorithms and try to compare them in the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.
 Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
