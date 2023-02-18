@@ -169,7 +169,7 @@ if __name__ == "__main__":
     # Metadata about the environment
     action_shape = env.single_action_space.n
 
-    # Create the policy and target networks and the optimizer
+    # Create the networks and the optimizer
     policy_net = QNetwork(args, action_shape)
     target_net = QNetwork(args, action_shape)
     target_net.load_state_dict(policy_net.state_dict())

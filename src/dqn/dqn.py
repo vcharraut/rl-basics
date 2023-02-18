@@ -75,7 +75,7 @@ class ReplayBuffer:
         batch = self.transition(*zip(*random.sample(self.buffer, self.batch_size)))
 
         states = torch.cat(batch.state).to(self.device)
-        actions = torch.stack(batch.action).to(self.device)
+        actions = torch.cat(batch.action).unsqueeze(-1).to(self.device)
         rewards = torch.cat(batch.reward).to(self.device)
         next_states = torch.cat(batch.next_state).to(self.device)
         flags = torch.cat(batch.flag).to(self.device)
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     obversation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
-    # Create the policy and target networks and the optimizer
+    # Create the networks and the optimizer
     policy_net = QNetwork(args, obversation_shape, action_shape)
     target_net = QNetwork(args, obversation_shape, action_shape)
     target_net.load_state_dict(policy_net.state_dict())

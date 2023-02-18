@@ -101,26 +101,33 @@ class ActorNet(nn.Module):
             self.cuda()
 
     def forward(self, state):
-        LOG_STD_MAX = 2
-        LOG_STD_MIN = -5
+        log_std_max = 2
+        log_std_min = -5
 
         output = self.network(state)
-
         mean = self.fc_mean(output)
         log_std = torch.tanh(self.fc_logstd(output))
 
-        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)
+        # Rescale log_std to ensure it is within range [log_std_min, log_std_max].
+        log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
         std = log_std.exp()
+
+        # Sample action using reparameterization trick.
         normal = Normal(mean, std)
-        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        x_t = normal.rsample()
         y_t = torch.tanh(x_t)
 
+        # Rescale and shift the action.
         action = y_t * self.action_scale + self.action_bias
+
+        # Calculate the log probability of the sampled action.
         log_prob = normal.log_prob(x_t)
 
-        # Enforcing Action Bound
+        # Enforce action bounds.
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
+        log_prob = log_prob.sum(dim=1, keepdim=True)
+
+        # Rescale mean and shift it to match the action range.
         mean = torch.tanh(mean) * self.action_scale + self.action_bias
 
         return action, log_prob.squeeze()
