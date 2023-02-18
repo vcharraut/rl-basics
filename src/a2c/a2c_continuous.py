@@ -120,6 +120,7 @@ if __name__ == "__main__":
         Path(__file__).parent.resolve().parents[1], "runs", f"{args.env_id}__{algo_name}__{date}"
     )
 
+    # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
 
