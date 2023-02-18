@@ -109,7 +109,7 @@ class ActorCriticNet(nn.Module):
         return log_probs, critic_values, dist_entropy
 
 
-def main():
+if __name__ == "__main__":
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M"))
@@ -271,7 +271,3 @@ def main():
                 while not terminated or not truncated:
                     action = policy_net(torch.from_numpy(state).float())
                     state, _, terminated, truncated, _ = env.step(action)
-
-
-if __name__ == "__main__":
-    main()
