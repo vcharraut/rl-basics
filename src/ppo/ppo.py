@@ -340,5 +340,6 @@ if __name__ == "__main__":
                 truncated = False
 
                 while not terminated or not truncated:
-                    action = policy_net(torch.from_numpy(state).float())
+                    state_tensor = torch.from_numpy(state).to(args.device).float()
+                    action, _, _ = policy_net(state_tensor)
                     state, _, terminated, truncated, _ = env.step(action)
