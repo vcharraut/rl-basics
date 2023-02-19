@@ -7,3 +7,9 @@ PPO updates the policy by optimizing a surrogate objective, which is a locally a
 In PPO, the agent collects experiences through interactions with its environment, and uses these experiences to update its policy. The policy is updated by optimizing a combination of the expected reward and a term that measures the difference between the new and old policies, called the "KL-divergence." The optimization process is repeated until the policy converges to an optimal solution.
 
 PPO is known for its sample efficiency and stability, making it a popular choice for solving complex and challenging problems in reinforcement learning. Additionally, it is relatively simple to implement and is able to handle large and high-dimensional action spaces.
+
+## Videos
+
+### LunarLander-v2
+
+![lunar-lander](../../media/videos/lunar-lander-ppo.mp4)

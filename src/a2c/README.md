@@ -7,3 +7,9 @@ In A2C, the agent uses the actor network to determine its actions and the critic
 At each time step, the agent takes an action and receives a reward and new state observation. The critic network then updates its estimate of the state value based on the received reward and the new state observation. The actor network updates its policy based on the estimated value and the advantage function, which is the difference between the estimated value and the expected reward.
 
 A2C has several advantages over other reinforcement learning methods, such as improved stability and sample efficiency. It also scales well to large and complex environments, making it a popular choice for solving challenging problems in reinforcement learning.
+
+## Videos
+
+### LunarLander-v2
+
+![lunar-lander](../../media/videos/lunar-lander-a2c.mp4)

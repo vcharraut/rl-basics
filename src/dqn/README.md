@@ -7,3 +7,9 @@ In DQN, the agent collects experiences through interactions with its environment
 One of the key innovations of DQN is the use of a replay buffer to store experiences and sample a mini-batch of experiences to update the Q-function. This allows the algorithm to break the correlation between consecutive experiences and improves the stability of learning.
 
 DQN is known for its sample efficiency and stability, making it a popular choice for solving complex and challenging problems in reinforcement learning. Additionally, it is relatively simple to implement and is able to handle large and high-dimensional state spaces.
+
+## Videos
+
+### LunarLander-v2
+
+![lunar-lander](../../media/videos/lunar-lander-dqn.mp4)
