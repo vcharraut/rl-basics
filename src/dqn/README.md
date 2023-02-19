@@ -12,5 +12,7 @@ DQN is known for its sample efficiency and stability, making it a popular choice
 
 ### LunarLander-v2
 
-<video src="../../media/videos/lunar-lander-dqn.mp4" controls="controls" style="max-width: 730px;">
-</video>
+<details>
+  <summary>LunarLander-v2</summary>
+  <img src="https://github.com/valentin-cnt/rl-gym-zoo/blob/master/media/videos/lunar-lander-dqn.gif?raw=true" alt="lunar-lander-dqn">
+</details>
