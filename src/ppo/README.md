@@ -14,5 +14,5 @@ PPO is known for its sample efficiency and stability, making it a popular choice
 
 <details>
   <summary>LunarLander-v2</summary>
-  <img src="https://github.com/valentin-cnt/rl-gym-zoo/blob/master/media/videos/lunar-lander-ppo.gif?raw=true" alt="lunar-lander-ppo">
+  <img src="https://github.com/valentin-cnt/rl-gym-zoo/blob/master/media/gif/lunar-lander-ppo.gif?raw=true" alt="lunar-lander-ppo">
 </details>

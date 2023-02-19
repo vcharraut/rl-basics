@@ -73,11 +73,11 @@ poetry run tensorboard --logdir=runs
 
 ### LunarLander-v2
 
-![lunar-lander](media/images/lunar-lander.png)
+![lunar-lander](media/png/lunar-lander.png)
 
 ### HalfChetaah-v4
 
-![half-cheetah](media/images/half-cheetah.png)
+![half-cheetah](media/png/half-cheetah.png)
 
 ## Acknowledgments
 
