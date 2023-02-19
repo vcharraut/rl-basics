@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
     # Metadata about the environment
     obversation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.n
+    action_shape = envs.single_action_space.shape
 
     # Create policy network and optimizer
     policy_net = ActorCriticNet(args, obversation_shape, action_shape)
@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     # Create buffers
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape)
-    actions = torch.zeros((args.num_steps, args.num_envs))
+    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape)
     rewards = torch.zeros((args.num_steps, args.num_envs))
     flags = torch.zeros((args.num_steps, args.num_envs))
 
@@ -272,3 +272,6 @@ if __name__ == "__main__":
                 while not terminated or not truncated:
                     action = policy_net(torch.from_numpy(state).float())
                     state, _, terminated, truncated, _ = env.step(action)
+
+                    state_tensor = torch.from_numpy(state).float()
+                    action = policy_net(state_tensor)
