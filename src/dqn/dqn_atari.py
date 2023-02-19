@@ -291,5 +291,6 @@ if __name__ == "__main__":
                 truncated = False
 
                 while not terminated or not truncated:
-                    action = policy_net(torch.from_numpy(state).float())
+                    state = torch.from_numpy(state).to(args.device).float()
+                    action = torch.argmax(policy_net(state), dim=0).cpu().numpy()
                     state, _, terminated, truncated, _ = env.step(action)
