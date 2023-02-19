@@ -18,9 +18,9 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_id", type=str, default="LunarLander-v2")
-    parser.add_argument("--total_timesteps", type=int, default=50_000)
+    parser.add_argument("--total_timesteps", type=int, default=500_000)
     parser.add_argument("--num_envs", type=int, default=1)
-    parser.add_argument("--num_steps", type=int, default=128)
+    parser.add_argument("--num_steps", type=int, default=256)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
