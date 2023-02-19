@@ -10,8 +10,6 @@ A2C has several advantages over other reinforcement learning methods, such as im
 
 ## Videos
 
-### LunarLander-v2
-
 <details>
   <summary>LunarLander-v2</summary>
   <img src="https://github.com/valentin-cnt/rl-gym-zoo/blob/master/media/gif/lunar-lander-a2c.gif?raw=true" alt="lunar-lander-ppo">
