@@ -39,10 +39,19 @@ def parse_args():
     return args
 
 
-def make_env(env_id):
+def make_env(env_id, capture_video=False):
     def thunk():
 
-        env = gym.make(env_id)
+        if capture_video:
+            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.wrappers.RecordVideo(
+                env=env,
+                video_folder=f"{run_dir}/videos/",
+                episode_trigger=lambda x: x,
+                disable_logger=True,
+            )
+        else:
+            env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
@@ -249,19 +258,21 @@ if __name__ == "__main__":
 
     # Capture video of the policy
     if args.capture_video:
-        with gym.make(args.env_id, render_mode="rgb_array") as env:
-            env = gym.wrappers.RecordVideo(
-                env=env,
-                video_folder=f"{run_dir}/videos/",
-                episode_trigger=lambda x: x,
-                disable_logger=True,
-            )
+        print(f"Capturing videos and saving them to {run_dir}/videos ...")
+        env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
+        state, _ = env_test.reset()
+        count_episodes = 0
 
-            for _ in range(10):
-                state, _ = env.reset()
-                terminated = False
-                truncated = False
+        while count_episodes < 10:
+            with torch.no_grad():
+                action = policy_net(torch.from_numpy(state).float())
+                state, _, terminated, truncated, _ = env_test.step(action)
 
-                while not terminated or not truncated:
-                    action = policy_net(torch.from_numpy(state).float())
-                    state, _, terminated, truncated, _ = env.step(action)
+            state_tensor = torch.from_numpy(state).float()
+            action = policy_net(state_tensor)
+
+            if terminated or truncated:
+                count_episodes += 1
+
+        env_test.close()
+        print("Done!")
