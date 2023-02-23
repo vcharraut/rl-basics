@@ -15,16 +15,16 @@ version = "0.1.0"
 
 [tool.poetry.dependencies]
 flax = {optional = true, version = "^0.6.3"}
-gymnasium = {extras = ["all"], version = "^0.27.0"}
+gymnasium = {extras = ["all"], version = "^0.27.1"}
 numpy = "^1.24.0"
 python = "^3.10"
-torch = "^1.13.0"
+torch = "^1.13.1"
 
 [tool.poetry.group.atari.dependencies]
 autorom = {extras = ["accept-rom-license"], version = "^0.5.0"}
 
 [tool.poetry.group.dev.dependencies]
-black = "^22.12.0"
+black = "^23.1.0"
 pre-commit = "^3.0.4"
 
 [tool.poetry.group.viz.dependencies]
