@@ -44,7 +44,6 @@ def parse_args():
 
 def make_env(env_id, capture_video=False):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
@@ -214,7 +213,6 @@ if __name__ == "__main__":
 
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
-
         if global_step < args.learning_start:
             action = Uniform(action_low, action_high).sample().unsqueeze(0)
         else:

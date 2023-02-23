@@ -43,7 +43,6 @@ def parse_args():
 
 def make_env(env_id, capture_video=False):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
@@ -198,7 +197,6 @@ if __name__ == "__main__":
 
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
-
         with torch.no_grad():
             # Exploration or intensification
             exploration_prob = get_exploration_prob(args, global_step)

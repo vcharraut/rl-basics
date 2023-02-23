@@ -48,7 +48,6 @@ def parse_args():
 
 def make_env(env_id, capture_video=False):
     def thunk():
-
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
@@ -190,7 +189,6 @@ if __name__ == "__main__":
 
     # Main loop
     for _ in tqdm(range(args.num_updates)):
-
         for i in range(args.num_steps):
             # Update global step
             global_step += 1 * args.num_envs
@@ -263,7 +261,6 @@ if __name__ == "__main__":
 
         # Perform PPO update
         for _ in range(args.num_optims):
-
             # Shuffle batch
             np.random.shuffle(batch_indexes)
 
