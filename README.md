@@ -36,7 +36,7 @@ poetry update
 
 ⚠️ **Important**: The package `box2d-py` doesn't install properly with poetry.
 
-You should run `pip install box2d-py=2.3.5` before `poetry update` to make sure everything install correctly.
+You should run `pip install box2d-py==2.3.5` before `poetry update` to make sure everything install correctly.
 
 ## Usage
 
