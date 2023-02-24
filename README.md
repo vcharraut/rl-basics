@@ -5,9 +5,10 @@
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 [![CodeFactor](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo/badge)](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo)
 
-The goal of this repository is to implement popular RL algorithms and try to compare them in the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.
-Made in Python with [Pytorch](https://github.com/pytorch/pytorch).
-Every Gymansium environments are supported, including MuJoCo and Atari.
+This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.
+It is developed using [Pytorch](https://github.com/pytorch/pytorch) in Python language and supports all Gymnasium environments, including MuJoCo and Atari.
+
+This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl). I highly recommend you to check it out if you are looking for a more complete and well documented RL library.
 
 | RL Algorithm                                           | Pytorch                                                                                                                                                                                                                                                                               | Flax |
 |--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
@@ -78,7 +79,3 @@ poetry run tensorboard --logdir=runs
 ### HalfChetaah-v4
 
 ![half-cheetah](media/png/HalfCheetah-v4.png)
-
-## Acknowledgments
-
-- [CleanRL](https://github.com/vwxyzjn/cleanrl): Some parts of my implementations come directly from the repository, so if you look for a complete and detailed code, you should check it first!
