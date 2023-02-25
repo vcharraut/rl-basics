@@ -22,7 +22,7 @@ This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl
 ## Prerequisites
 
 - poetry >= 1.3.0
-- python >= 3.10
+- python >= 3.10, < 3.11
 
 ## Installation
 
@@ -32,6 +32,7 @@ Clone the code repo and install the requirements.
 git clone https://github.com/valentin-cnt/rl-gym-zoo.git
 cd rl-gym-zoo
 
+poetry env use 3.10
 poetry update
 ```
 
@@ -48,9 +49,10 @@ poetry shell
 python src/dqn/dqn.py
 python src/dqn/dqn_atari.py
 
-# PPO
+# A2C
 python src/a2c/a2c.py
 python src/a2c/a2c_continuous.py
+python src/a2c/a2c_atari.py
 
 # PPO
 python src/ppo/ppo.py
@@ -62,6 +64,9 @@ python src/ddpg/ddpg.py
 
 # TD3
 python src/td3/td3.py
+
+# SAC
+python src/sac/sac.py
 ```
 
 To view logs on Tensorboard:
