@@ -14,7 +14,7 @@ readme = "README.md"
 version = "0.1.0"
 
 [tool.poetry.dependencies]
-flax = {optional = true, version = "^0.6.3"}
+flax = "^0.6.3"
 gymnasium = {extras = ["all"], version = "^0.27.1"}
 numpy = "^1.24.0"
 python = "^3.10"
