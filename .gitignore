@@ -1,7 +1,8 @@
+# Folders
 .venv/
 .vscode/
 runs/
 wandb/
 
-poetry.lock
+# Files
 benchmark.yaml
