@@ -1,8 +1,5 @@
 import argparse
-import math
-import random
 import time
-from collections import deque, namedtuple
 from datetime import datetime
 from pathlib import Path
 
@@ -21,17 +18,17 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_id", type=str, default="PongNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--buffer_size", type=int, default=500_000)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--buffer_size", type=int, default=600_000)
+    parser.add_argument("--learning_rate", type=float, default=2.5e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
-    parser.add_argument("--eps_decay", type=int, default=200_000)
+    parser.add_argument("--eps_decay", type=int, default=300_000)
     parser.add_argument("--learning_start", type=int, default=50_000)
     parser.add_argument("--train_frequency", type=int, default=4)
+    parser.add_argument("--target_update_frequency", type=int, default=10_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -84,26 +81,35 @@ class QNetwork(nn.Module):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size):
-        self.buffer = deque(maxlen=buffer_size)
+    def __init__(self, buffer_size, batch_size, state_dim):
+        self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.int8)
+        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
+        self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
+        self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
+
         self.batch_size = batch_size
+        self.max_size = buffer_size
+        self.idx = 0
+        self.size = 0
 
-        self.transition = namedtuple(
-            "Transition", field_names=["state", "action", "reward", "next_state", "flag"]
-        )
+    def push(self, state, action, reward, flag):
+        self.state_buffer[self.idx] = state
+        self.action_buffer[self.idx] = action
+        self.reward_buffer[self.idx] = reward
+        self.flag_buffer[self.idx] = flag
 
-    def push(self, state, action, reward, next_state, flag):
-        self.buffer.append(self.transition(state, action, reward, next_state, flag))
+        self.idx = (self.idx + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        batch = self.transition(*zip(*random.sample(self.buffer, self.batch_size)))
+        idxs = np.random.randint(0, self.size - 1, size=self.batch_size)
 
         return {
-            "states": np.array(batch.state).squeeze(),
-            "actions": np.array(batch.action).squeeze(),
-            "rewards": np.array(batch.reward).squeeze(),
-            "next_states": np.array(batch.next_state).squeeze(),
-            "flags": np.array(batch.flag).squeeze(),
+            "states": self.state_buffer[idxs],
+            "actions": self.action_buffer[idxs],
+            "rewards": self.reward_buffer[idxs],
+            "next_states": self.state_buffer[idxs + 1],
+            "flags": self.flag_buffer[idxs],
         }
 
 
@@ -113,11 +119,11 @@ class TrainState(TrainState):
 
 def loss_fn(params, target_params, apply_fn, batch, gamma):
     # Compute TD error
-    q_pred = apply_fn(params, batch["states"])
-    td_predict = jax.vmap(lambda qp, a: qp[a])(q_pred, batch["actions"])
+    q_predict = apply_fn(params, batch["states"])
+    td_predict = jax.vmap(lambda qp, a: qp[a])(q_predict, batch["actions"])
 
     # Compute TD target with Double Q-Learning
-    action_by_qvalue = apply_fn(params, batch["next_states"]).argmax(1)
+    action_by_qvalue = apply_fn(params, batch["next_states"]).argmax(axis=1)
     q_target = apply_fn(target_params, batch["next_states"])
     max_q_target = jax.vmap(lambda qt, a: qt[a])(q_target, action_by_qvalue)
 
@@ -136,9 +142,9 @@ def train_step(train_state, batch, gamma):
     return train_state, loss
 
 
-def get_exploration_prob(args, step):
+def get_exploration_prob(eps_start, eps_end, eps_decay, step):
     # Linear decay of epsilon
-    return args.eps_end + (args.eps_start - args.eps_end) * math.exp(-1.0 * step / args.eps_decay)
+    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
 if __name__ == "__main__":
@@ -168,7 +174,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
 
     # Create vectorized environment
@@ -183,11 +188,14 @@ if __name__ == "__main__":
 
     # Create the networks and the optimizer
     policy_net = QNetwork(num_actions=action_shape)
+    initial_params = policy_net.init(jax.random.PRNGKey(args.seed), state)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    initial_params = policy_net.init(jax.random.PRNGKey(args.seed), state)
+    # Jit the train step
+    policy_net.apply = jax.jit(policy_net.apply)
 
+    # Create the train state
     train_state = TrainState.create(
         apply_fn=policy_net.apply,
         params=initial_params,
@@ -195,12 +203,10 @@ if __name__ == "__main__":
         tx=optimizer,
     )
 
-    policy_net.apply = jax.jit(policy_net.apply)
-
     del initial_params
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape)
 
     log_episodic_returns = []
 
@@ -209,7 +215,9 @@ if __name__ == "__main__":
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
         # Exploration or intensification
-        exploration_prob = get_exploration_prob(args, global_step)
+        exploration_prob = get_exploration_prob(
+            args.eps_start, args.eps_end, args.eps_decay, global_step
+        )
 
         # Log exploration probability
         writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
@@ -225,11 +233,10 @@ if __name__ == "__main__":
         # Perform action
         next_state, reward, terminated, truncated, infos = env.step(action)
 
-        # Convert transition to torch tensors
         flag = np.logical_or(terminated, truncated)
 
         # Store transition in the replay buffer
-        replay_buffer.push(state, action, reward, next_state, flag)
+        replay_buffer.push(state, action, reward, flag)
 
         state = next_state
 
@@ -250,17 +257,12 @@ if __name__ == "__main__":
                 # Train
                 train_state, loss = train_step(train_state, batch, args.gamma)
 
-                # Update target network (soft update)
-            # update target network
-            if global_step % 1000 == 0:
-                train_state = train_state.replace(
-                    target_params=optax.incremental_update(
-                        train_state.params, train_state.target_params, args.tau
-                    )
-                )
-
                 # Log training metrics
                 writer.add_scalar("train/loss", np.asarray(loss), global_step)
+
+            # Update target network
+            if not global_step % args.target_update_frequency:
+                train_state = train_state.replace(target_params=train_state.params)
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
