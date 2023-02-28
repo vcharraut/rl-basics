@@ -1,6 +1,8 @@
 absl-py==1.4.0
 ale-py==0.8.1
 appdirs==1.4.4
+AutoROM==0.4.2
+AutoROM.accept-rom-license==0.5.5
 black==23.1.0
 box2d-py==2.3.5
 cached-property==1.5.2
@@ -41,6 +43,7 @@ jax==0.3.24
 jax-jumpy==0.2.0
 jaxlib==0.3.24+cuda11.cudnn82
 kiwisolver==1.4.4
+libtorrent==2.0.7
 lz4==4.3.2
 Markdown==3.4.1
 markdown-it-py==2.2.0
