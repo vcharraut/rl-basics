@@ -12,17 +12,12 @@ This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl
 
 | RL Algorithm                                           | Pytorch                                                                                                                                                                                                                                                                               | Flax |
 |--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
-| [DQN](https://arxiv.org/abs/1312.5602)                 | [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/pytorch_dqn_discrete.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/pytorch_dqn_atari.py)                                                                                                         |[atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/flax_dqn_atari.py) |
+| [DQN](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf)                 | [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/pytorch_dqn_discrete.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/pytorch_dqn_atari.py)                                                                                                         | [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/flax_dqn_discrete.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/dqn/flax_dqn_atari.py) |
 | [A2C](https://arxiv.org/abs/1602.01783)                | [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/pytorch_a2c_discrete.py) - [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/pytorch_a2c_continuous.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/pytorch_a2c_atari.py) |  [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/flax_a2c_discrete.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/a2c/flax_a2c_atari.py)    |
 | [PPO](https://arxiv.org/abs/1707.06347)                | [discrete](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/pytorch_ppo_discrete.py) - [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/pytorch_ppo_continuous.py) - [atari](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ppo/pytorch_ppo_atari.py) |      |
 | [DDPG](https://proceedings.mlr.press/v32/silver14.pdf) | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ddpg/pytorch_ddpg_continous.py)                                                                                                                                                                                                    |      |
 | [TD3](https://arxiv.org/abs/1802.09477)                | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/td3/pytorch_td3_continous.py)                                                                                                                                                                                                       |      |
-| [SAC](https://arxiv.org/abs/1801.01290)                | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/sac/pytorch_sac_continuous.py)                                                                                                                                                                                                       |      |
-
-## Prerequisites
-
-- poetry >= 1.3.0
-- python >= 3.10, < 3.11
+| [SAC](https://arxiv.org/abs/1801.01290)                | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/sac/pytorch_sac_continuous.py)
 
 ## Installation
 
@@ -35,10 +30,6 @@ cd rl-gym-zoo
 poetry env use 3.10
 poetry update
 ```
-
-⚠️ **Important**: The package `box2d-py` doesn't install properly with poetry.
-
-You should run `pip install box2d-py==2.3.5` before `poetry update` to make sure everything install correctly.
 
 ## Usage
 
