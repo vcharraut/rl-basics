@@ -1,8 +1,5 @@
 import argparse
-import math
-import random
 import time
-from collections import deque, namedtuple
 from datetime import datetime
 from pathlib import Path
 
@@ -24,12 +21,12 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--eps_end", type=float, default=0.05)
     parser.add_argument("--eps_start", type=int, default=1)
     parser.add_argument("--eps_decay", type=int, default=50_000)
     parser.add_argument("--learning_start", type=int, default=10_000)
     parser.add_argument("--train_frequency", type=int, default=10)
+    parser.add_argument("--target_update_frequency", type=int, default=1_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -67,28 +64,37 @@ def make_env(env_id, capture_video=False):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, device):
-        self.buffer = deque(maxlen=buffer_size)
+    def __init__(self, buffer_size, batch_size, state_dim, device):
+        self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.float32)
+        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
+        self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
+        self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
+
         self.batch_size = batch_size
+        self.max_size = buffer_size
+        self.idx = 0
+        self.size = 0
         self.device = device
 
-        self.transition = namedtuple(
-            "Transition", field_names=["state", "action", "reward", "next_state", "flag"]
-        )
+    def push(self, state, action, reward, flag):
+        self.state_buffer[self.idx] = state
+        self.action_buffer[self.idx] = action
+        self.reward_buffer[self.idx] = reward
+        self.flag_buffer[self.idx] = flag
 
-    def push(self, state, action, reward, next_state, flag):
-        self.buffer.append(self.transition(state, action, reward, next_state, flag))
+        self.idx = (self.idx + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        batch = self.transition(*zip(*random.sample(self.buffer, self.batch_size)))
+        idxs = np.random.randint(0, self.size - 1, size=self.batch_size)
 
-        states = torch.cat(batch.state).to(self.device)
-        actions = torch.cat(batch.action).unsqueeze(-1).to(self.device)
-        rewards = torch.cat(batch.reward).to(self.device)
-        next_states = torch.cat(batch.next_state).to(self.device)
-        flags = torch.cat(batch.flag).to(self.device)
-
-        return states, actions, rewards, next_states, flags
+        return (
+            torch.from_numpy(self.state_buffer[idxs]).to(self.device),
+            torch.from_numpy(self.action_buffer[idxs]).unsqueeze(-1).to(self.device),
+            torch.from_numpy(self.reward_buffer[idxs]).to(self.device),
+            torch.from_numpy(self.state_buffer[idxs + 1]).to(self.device),
+            torch.from_numpy(self.flag_buffer[idxs]).to(self.device),
+        )
 
 
 class QNetwork(nn.Module):
@@ -113,9 +119,9 @@ class QNetwork(nn.Module):
         return self.network(state)
 
 
-def get_exploration_prob(args, step):
+def get_exploration_prob(eps_start, eps_end, eps_decay, step):
     # Linear decay of epsilon
-    return args.eps_end + (args.eps_start - args.eps_end) * math.exp(-1.0 * step / args.eps_decay)
+    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
 if __name__ == "__main__":
@@ -145,7 +151,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
@@ -164,11 +169,10 @@ if __name__ == "__main__":
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, args.device)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
     # Initialize environment
     state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
-    state = torch.from_numpy(state).to(args.device).float()
 
     log_episodic_returns = []
 
@@ -178,7 +182,9 @@ if __name__ == "__main__":
     for global_step in tqdm(range(args.total_timesteps)):
         with torch.no_grad():
             # Exploration or intensification
-            exploration_prob = get_exploration_prob(args, global_step)
+            exploration_prob = get_exploration_prob(
+                args.eps_start, args.eps_end, args.eps_decay, global_step
+            )
 
             # Log exploration probability
             writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
@@ -188,18 +194,14 @@ if __name__ == "__main__":
                 action = torch.randint(action_shape, (1,)).to(args.device)
             else:
                 # Intensification
-                action = torch.argmax(policy_net(state), dim=1)
+                state_torch = torch.from_numpy(state).to(args.device).float()
+                action = torch.argmax(policy_net(state_torch), dim=1)
 
         # Perform action
         next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
 
-        # Convert transition to torch tensors
-        next_state = torch.from_numpy(next_state).to(args.device).float()
-        reward = torch.from_numpy(reward).to(args.device).float()
-        flag = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device).float()
-
         # Store transition in the replay buffer
-        replay_buffer.push(state, action, reward, next_state, flag)
+        replay_buffer.push(state, action, reward, np.logical_or(terminated, truncated))
 
         state = next_state
 
@@ -236,14 +238,12 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
 
-                # Update target network (soft update)
-                for param, target_param in zip(policy_net.parameters(), target_net.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
-
                 # Log training metrics
                 writer.add_scalar("train/loss", loss, global_step)
+
+            # Update target network
+            if not global_step % args.target_update_frequency:
+                target_net.load_state_dict(policy_net.state_dict())
 
         writer.add_scalar(
             "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
