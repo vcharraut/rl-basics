@@ -229,10 +229,8 @@ if __name__ == "__main__":
         # Perform action
         next_state, reward, terminated, truncated, infos = env.step(action)
 
-        flag = np.logical_or(terminated, truncated)
-
         # Store transition in the replay buffer
-        replay_buffer.push(state, action, reward, flag)
+        replay_buffer.push(state, action, reward, np.logical_or(terminated, truncated))
 
         state = next_state
 
