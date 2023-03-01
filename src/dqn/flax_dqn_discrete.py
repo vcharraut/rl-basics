@@ -79,7 +79,7 @@ class QNetwork(nn.Module):
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, state_dim):
         self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
+        self.action_buffer = np.zeros((buffer_size), dtype=np.int32)
         self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
         self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
 
