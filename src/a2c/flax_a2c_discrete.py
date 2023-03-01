@@ -1,5 +1,4 @@
 import argparse
-import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -65,20 +64,20 @@ def make_env(env_id, capture_video=False):
 
 class ActorCriticNet(nn.Module):
     num_actions: int
+    list_layer: list
 
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(features=64)(x)
-        x = nn.tanh(x)
-        x = nn.Dense(features=64)(x)
-        x = nn.tanh(x)
+        for layer in self.list_layer:
+            x = nn.Dense(features=layer)(x)
+            x = nn.tanh(x)
 
         logits = nn.Dense(features=self.num_actions, name="actor")(x)
-        policy_log_probabilities = nn.log_softmax(logits)
+        log_probs = nn.log_softmax(logits)
 
         values = nn.Dense(features=1, name="critic")(x)
 
-        return policy_log_probabilities, values.squeeze()
+        return log_probs, values.squeeze()
 
 
 @jax.jit
@@ -105,8 +104,9 @@ def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
 
     actor_loss = (-log_probs_act_taken * advantages).mean()
     critic_loss = jnp.square(advantages).mean()
+    entropy_loss = jnp.sum(-jnp.exp(log_probs) * log_probs, axis=1).mean()
 
-    return actor_loss + critic_loss * value_coef
+    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
 
 
 @jax.jit
@@ -150,7 +150,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
 
     # Create vectorized environment(s)
@@ -164,7 +163,7 @@ if __name__ == "__main__":
     state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(num_actions=action_shape)
+    policy_net = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
@@ -181,10 +180,10 @@ if __name__ == "__main__":
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape)
+    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
     actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int32)
-    rewards = np.zeros((args.num_steps, args.num_envs))
-    flags = np.zeros((args.num_steps, args.num_envs))
+    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
 
     log_episodic_returns = []
 
