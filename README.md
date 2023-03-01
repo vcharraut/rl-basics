@@ -5,10 +5,13 @@
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 [![CodeFactor](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo/badge)](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo)
 
-This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.
-It is developed using [Pytorch](https://github.com/pytorch/pytorch) and [Flax](https://github.com/google/flax) in Python language and supports all Gymnasium environments, including MuJoCo and Atari.
+This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework. The goal is to provide a simple and clean implementation of the algorithms, with a focus on readability and reproducibility. Each file is completely independant, and the code is commented to make it easy to understand. So you can easily copy-paste the code and use it at your own convenience.
+
+The project is written with Python, and [Pytorch](https://github.com/pytorch/pytorch) and [Flax](https://github.com/google/flax) are used as frameworks for the implementation. It supports all environments from Gymnasium, including MuJoCo and Atari environments.
 
 This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl). I highly recommend you to check it out if you are looking for a more complete and well documented RL library.
+
+You should be able to find the implementation of the following algorithms:
 
 | RL Algorithm                                           | Pytorch                                                                                                                                                                                                                                                                               | Flax |
 |--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
@@ -18,53 +21,6 @@ This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl
 | [DDPG](https://proceedings.mlr.press/v32/silver14.pdf) | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/ddpg/pytorch_ddpg_continous.py)                                                                                                                                                                                                    |      |
 | [TD3](https://arxiv.org/abs/1802.09477)                | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/td3/pytorch_td3_continous.py)                                                                                                                                                                                                       |      |
 | [SAC](https://arxiv.org/abs/1801.01290)                | [continuous](https://github.com/valentin-cnt/rl-gym-zoo/blob/master/src/sac/pytorch_sac_continuous.py)
-
-## Installation
-
-Clone the code repo and install the requirements.
-
-```shell
-git clone https://github.com/valentin-cnt/rl-gym-zoo.git
-cd rl-gym-zoo
-
-poetry env use 3.10
-poetry update
-```
-
-## Usage
-
-```shell
-poetry shell
-
-# DQN
-python src/dqn/dqn.py
-python src/dqn/dqn_atari.py
-
-# A2C
-python src/a2c/a2c.py
-python src/a2c/a2c_continuous.py
-python src/a2c/a2c_atari.py
-
-# PPO
-python src/ppo/ppo.py
-python src/ppo/ppo_continuous.py
-python src/ppo/ppo_atari.py
-
-# DDPG
-python src/ddpg/ddpg.py
-
-# TD3
-python src/td3/td3.py
-
-# SAC
-python src/sac/sac.py
-```
-
-To view logs on Tensorboard:
-
-```shell
-poetry run tensorboard --logdir=runs
-```
 
 ## Results
 
