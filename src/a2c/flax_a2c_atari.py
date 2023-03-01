@@ -1,5 +1,4 @@
 import argparse
-import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -150,7 +149,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
 
     # Create vectorized environment(s)
@@ -181,10 +179,10 @@ if __name__ == "__main__":
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape)
+    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
     actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int32)
-    rewards = np.zeros((args.num_steps, args.num_envs))
-    flags = np.zeros((args.num_steps, args.num_envs))
+    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
 
     log_episodic_returns = []
 

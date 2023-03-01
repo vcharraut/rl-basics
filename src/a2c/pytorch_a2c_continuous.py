@@ -1,5 +1,4 @@
 import argparse
-import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -71,7 +70,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, args, obversation_shape, action_shape):
+    def __init__(self, obversation_shape, action_shape, list_layer):
         super().__init__()
 
         fc_layer_value = np.prod(obversation_shape)
@@ -80,7 +79,7 @@ class ActorCriticNet(nn.Module):
         self.actor_net = nn.Sequential()
         self.critic_net = nn.Sequential()
 
-        for layer_value in args.list_layer:
+        for layer_value in list_layer:
             self.actor_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
             self.actor_net.append(nn.Tanh())
 
@@ -89,9 +88,8 @@ class ActorCriticNet(nn.Module):
 
             fc_layer_value = layer_value
 
-        self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
-
-        self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+        self.actor_net.append(layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01))
+        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
 
         self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
 
@@ -144,7 +142,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
@@ -156,14 +153,14 @@ if __name__ == "__main__":
     action_shape = envs.single_action_space.shape
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+    policy_net = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
 
     # Create buffers
-    states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape)
-    actions = torch.zeros((args.num_steps, args.num_envs) + action_shape)
-    rewards = torch.zeros((args.num_steps, args.num_envs))
-    flags = torch.zeros((args.num_steps, args.num_envs))
+    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
+    actions = np.zeros((args.num_steps, args.num_envs) + action_shape, dtype=np.float32)
+    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
 
     log_episodic_returns = []
 
@@ -188,10 +185,10 @@ if __name__ == "__main__":
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state_tensor
-            actions[i] = torch.from_numpy(action)
-            rewards[i] = torch.from_numpy(reward)
-            flags[i] = torch.from_numpy(np.logical_or(terminated, truncated))
+            states[i] = state
+            actions[i] = action
+            rewards[i] = reward
+            flags[i] = np.logical_or(terminated, truncated)
 
             state = next_state
 
@@ -209,11 +206,11 @@ if __name__ == "__main__":
 
                 break
 
-        td_target = torch.zeros(rewards.size())
-        gain = torch.zeros(rewards.size(1))
+        td_target = np.zeros_like(rewards, dtype=np.float32)
+        gain = np.zeros(rewards.shape[1], dtype=np.float32)
 
         # Compute TD target
-        for i in reversed(range(td_target.size(0))):
+        for i in reversed(range(td_target.shape[0])):
             terminal = 1.0 - flags[i]
             gain = rewards[i] + gain * args.gamma * terminal
             td_target[i] = gain
@@ -222,16 +219,21 @@ if __name__ == "__main__":
         td_target = td_target.squeeze()
 
         # Flatten batch
-        states_batch = states.flatten(0, 1)
-        actions_batch = actions.flatten(0, 1)
-        td_target_batch = td_target.reshape(-1)
+        batch_states = states.reshape(-1, *obversation_shape)
+        batch_actions = actions.reshape(-1, *action_shape)
+        batch_td_targets = td_target.reshape(-1)
+
+        # Convert to tensor
+        batch_states = torch.from_numpy(batch_states)
+        batch_actions = torch.from_numpy(batch_actions)
+        batch_td_targets = torch.from_numpy(batch_td_targets)
 
         # Compute losses
-        log_probs, td_predict, dist_entropy = policy_net.evaluate(states_batch, actions_batch)
-        advantages = td_target_batch - td_predict
+        log_probs, td_predict, dist_entropy = policy_net.evaluate(batch_states, batch_actions)
+        advantages = batch_td_targets - td_predict
 
         actor_loss = (-log_probs * advantages.detach()).mean()
-        critic_loss = mse_loss(td_target_batch, td_predict)
+        critic_loss = mse_loss(batch_td_targets, td_predict)
         entropy_bonus = dist_entropy.mean()
 
         loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
