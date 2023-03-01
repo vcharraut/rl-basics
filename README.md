@@ -5,7 +5,7 @@
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 [![CodeFactor](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo/badge)](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo)
 
-This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework. The goal is to provide a simple and clean implementation of the algorithms, with a focus on readability and reproducibility. Each file is completely independant, and the code is commented to make it easy to understand. So you can easily copy-paste the code and use it at your own convenience.
+This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework. The goal is to provide a simple and clean implementation of the algorithms, with a focus on readability and reproducibility. Each file is designed to be independent, with code that is well-commented and easy to understand (at least I hope so!). This makes it easy for users to copy and paste the code and use it at their own convenience.
 
 The project is written with Python, and [Pytorch](https://github.com/pytorch/pytorch) and [Flax](https://github.com/google/flax) are used as frameworks for the implementation. It supports all environments from Gymnasium, including MuJoCo and Atari environments.
 
