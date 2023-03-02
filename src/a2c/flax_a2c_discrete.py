@@ -1,4 +1,5 @@
 import argparse
+import functools
 import time
 from datetime import datetime
 from pathlib import Path
@@ -80,37 +81,41 @@ class ActorCriticNet(nn.Module):
         return log_probs, values.squeeze()
 
 
+@functools.partial(jax.jit, static_argnums=0)
+def get_policy(apply_fn, params, state):
+    return apply_fn(params, state)
+
+
 @jax.jit
+@functools.partial(jax.vmap, in_axes=(1, 1, None), out_axes=1)
 def compute_td_target(rewards, flags, gamma):
-    td_target = jnp.zeros_like(rewards)
-    gain = jnp.zeros(rewards.shape[1])
+    td_target = []
+    gain = 0.0
+    for t in reversed(range(len(rewards))):
+        terminal = 1.0 - flags[t]
+        gain = rewards[t] + gain * gamma * terminal
+        td_target.append(gain)
 
-    for i in reversed(range(td_target.shape[0])):
-        terminal = 1.0 - flags[i]
-        gain = rewards[i] + gain * gamma * terminal
-        td_target = td_target.at[i].set(gain)
-
-    td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
-    td_target = td_target.squeeze()
-
-    return td_target
-
-
-def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
-    log_probs, td_predict = apply_fn(params, batch["states"])
-    log_probs_act_taken = jax.vmap(lambda lp, a: lp[a])(log_probs, batch["actions"])
-
-    advantages = batch["td_target"] - td_predict
-
-    actor_loss = (-log_probs_act_taken * advantages).mean()
-    critic_loss = jnp.square(advantages).mean()
-    entropy_loss = jnp.sum(-jnp.exp(log_probs) * log_probs, axis=1).mean()
-
-    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+    td_target = td_target[::-1]
+    return jnp.array(td_target)
 
 
 @jax.jit
 def train_step(train_state, batch, value_coef, entropy_coef):
+    def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
+        states, actions, td_target = batch
+        log_probs, td_predict = get_policy(apply_fn, params, states)
+
+        log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
+
+        advantages = td_target - td_predict
+
+        actor_loss = (-log_probs_by_actions * advantages).mean()
+        critic_loss = jnp.square(advantages).mean()
+        entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
+
+        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(
         train_state.params,
@@ -175,8 +180,6 @@ if __name__ == "__main__":
         tx=optimizer,
     )
 
-    policy_net.apply = jax.jit(policy_net.apply)
-
     del initial_params
 
     # Create buffers
@@ -197,8 +200,8 @@ if __name__ == "__main__":
             global_step += 1 * args.num_envs
 
             # Get action
-            log_probs, _ = policy_net.apply(train_state.params, state)
-            probs = np.exp(np.array(log_probs))
+            log_probs, _ = get_policy(train_state.apply_fn, train_state.params, state)
+            probs = np.exp(log_probs)
             action = np.array(
                 [np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)]
             )
@@ -230,12 +233,15 @@ if __name__ == "__main__":
 
         td_target = compute_td_target(rewards, flags, args.gamma)
 
+        # Normalize td_target
+        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
+
         # Create batch
-        batch = {
-            "states": states.reshape(-1, *obversation_shape),
-            "actions": actions.reshape(-1),
-            "td_target": td_target.reshape(-1),
-        }
+        batch = (
+            states.reshape(-1, *obversation_shape),
+            actions.reshape(-1),
+            td_target.reshape(-1),
+        )
 
         # Train
         train_state, loss = train_step(
