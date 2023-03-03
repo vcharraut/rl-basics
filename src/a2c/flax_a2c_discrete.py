@@ -26,7 +26,6 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
-    parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
