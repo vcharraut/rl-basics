@@ -45,7 +45,7 @@ def make_env(env_id, capture_video=False):
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"{run_dir}/videos/",
+                video_folder="/videos/",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -81,7 +81,7 @@ class ActorCriticNet(nn.Module):
         return log_probs, values.squeeze()
 
 
-@functools.partial(jax.jit, static_argnums=0)
+@functools.partial(jax.jit, static_argnums=(0,))
 def get_policy(apply_fn, params, state):
     return apply_fn(params, state)
 
@@ -91,16 +91,16 @@ def get_policy(apply_fn, params, state):
 def compute_td_target(rewards, flags, gamma):
     td_target = []
     gain = 0.0
-    for t in reversed(range(len(rewards))):
-        terminal = 1.0 - flags[t]
-        gain = rewards[t] + gain * gamma * terminal
+    for i in reversed(range(len(rewards))):
+        terminal = 1.0 - flags[i]
+        gain = rewards[i] + gain * gamma * terminal
         td_target.append(gain)
 
     td_target = td_target[::-1]
     return jnp.array(td_target)
 
 
-@jax.jit
+@functools.partial(jax.jit, static_argnums=(2, 3))
 def train_step(train_state, batch, value_coef, entropy_coef):
     def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
         states, actions, td_target = batch
@@ -128,7 +128,7 @@ def train_step(train_state, batch, value_coef, entropy_coef):
     return train_state, loss
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M"))
@@ -272,18 +272,27 @@ if __name__ == "__main__":
     # Capture video of the policy
     if args.capture_video:
         print(f"Capturing videos and saving them to {run_dir}/videos ...")
-        env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
-        state, _ = env_test.reset()
+        # env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
+        state, _ = envs.reset()
         count_episodes = 0
+        sum_rewards = 0
 
-        while count_episodes < 10:
-            action = policy_net(state)
-            state, _, terminated, truncated, _ = env_test.step(action)
+        while count_episodes < 100:
+            log_probs, _ = get_policy(train_state.apply_fn, train_state.params, state)
+            probs = np.exp(log_probs)
+            action = np.array([np.random.choice(action_shape, p=probs[0])])
+            state, reward, terminated, _, _ = envs.step(action)
+            sum_rewards += reward
 
-            action = policy_net(state)
-
-            if terminated or truncated:
+            if terminated:
                 count_episodes += 1
+                print(f"TEST - Episode {count_episodes+1} finished with reward {sum_rewards}")
+                sum_rewards = 0
+                state, _ = envs.reset()
 
-        env_test.close()
+        envs.close()
         print("Done!")
+
+
+if __name__ == "__main__":
+    main()
