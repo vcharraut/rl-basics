@@ -44,7 +44,7 @@ def make_env(env_id, capture_video=False):
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"{run_dir}/videos/",
+                video_folder="/videos/",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -89,9 +89,9 @@ class ActorCriticNet(nn.Module):
             fc_layer_value = layer_value
 
         self.actor_net.append(layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01))
-        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
-
         self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
+
+        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
 
     def forward(self, state):
         action_mean = self.actor_net(state)
@@ -102,15 +102,15 @@ class ActorCriticNet(nn.Module):
 
         return action.cpu().numpy()
 
-    def evaluate(self, state, action):
-        action_mean = self.actor_net(state)
+    def evaluate(self, states, actions):
+        action_mean = self.actor_net(states)
         action_std = self.actor_logstd.expand_as(action_mean).exp()
         distribution = Normal(action_mean, action_std)
 
-        log_probs = distribution.log_prob(action).sum(-1)
+        log_probs = distribution.log_prob(actions).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)
 
-        critic_values = self.critic_net(state).squeeze()
+        critic_values = self.critic_net(states).squeeze()
 
         return log_probs, critic_values, dist_entropy
 
