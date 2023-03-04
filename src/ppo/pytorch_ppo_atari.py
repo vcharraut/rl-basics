@@ -51,7 +51,7 @@ def make_env(env_id, capture_video=False):
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"{run_dir}/videos/",
+                video_folder="/videos/",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -122,7 +122,7 @@ class ActorCriticNet(nn.Module):
         return self.critic_net(self.network(state)).squeeze(-1)
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
 
     date = str(datetime.now().strftime("%d-%m_%H:%M"))
@@ -345,3 +345,7 @@ if __name__ == "__main__":
 
         env_test.close()
         print("Done!")
+
+
+if __name__ == "__main__":
+    main()
