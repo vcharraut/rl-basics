@@ -1,5 +1,4 @@
 import argparse
-import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -52,7 +51,7 @@ def make_env(env_id, capture_video=False):
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder=f"{run_dir}/videos/",
+                video_folder="/videos/",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -78,7 +77,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, args, obversation_shape, action_shape):
+    def __init__(self, obversation_shape, action_shape, list_layer):
         super().__init__()
 
         fc_layer_value = np.prod(obversation_shape)
@@ -87,7 +86,7 @@ class ActorCriticNet(nn.Module):
         self.actor_net = nn.Sequential()
         self.critic_net = nn.Sequential()
 
-        for layer_value in args.list_layer:
+        for layer_value in list_layer:
             self.actor_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
             self.actor_net.append(nn.Tanh())
 
@@ -96,17 +95,18 @@ class ActorCriticNet(nn.Module):
 
             fc_layer_value = layer_value
 
-        self.actor_net.append(layer_init(nn.Linear(args.list_layer[-1], action_shape), std=0.01))
-        self.critic_net.append(layer_init(nn.Linear(args.list_layer[-1], 1), std=1.0))
+        self.actor_mean = layer_init(list_layer[-1], action_shape, std=0.01)
+        self.actor_std = layer_init(list_layer[-1], action_shape, std=0.01)
 
-        self.actor_logstd = nn.Parameter(torch.zeros(1, action_shape))
+        self.critic_net.append(layer_init(list_layer[-1], 1, std=1.0))
 
         if args.device.type == "cuda":
             self.cuda()
 
     def forward(self, state):
-        action_mean = self.actor_net(state)
-        action_std = self.actor_logstd.expand_as(action_mean).exp()
+        output = self.actor_net(state)
+        action_mean = self.actor_mean(output)
+        action_std = torch.sigmoid(self.actor_std(output)) + 1e-7
         distribution = Normal(action_mean, action_std)
 
         action = distribution.sample()
@@ -117,8 +117,9 @@ class ActorCriticNet(nn.Module):
         return action.cpu().numpy(), log_prob, critic_value
 
     def evaluate(self, states, actions):
-        action_mean = self.actor_net(states)
-        action_std = self.actor_logstd.expand_as(action_mean).exp()
+        output = self.actor_net(states)
+        action_mean = self.actor_mean(output)
+        action_std = torch.sigmoid(self.actor_std(output)) + 1e-7
         distribution = Normal(action_mean, action_std)
 
         log_probs = distribution.log_prob(actions).sum(-1)
@@ -159,7 +160,6 @@ if __name__ == "__main__":
 
     # Set seed for reproducibility
     if args.seed > 0:
-        random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
@@ -171,7 +171,8 @@ if __name__ == "__main__":
     action_shape = envs.single_action_space.shape
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(args, obversation_shape, action_shape)
+    policy_net = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
+
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
