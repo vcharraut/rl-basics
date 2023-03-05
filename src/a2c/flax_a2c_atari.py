@@ -2,7 +2,6 @@ import argparse
 import functools
 import time
 from datetime import datetime
-from pathlib import Path
 
 import gymnasium as gym
 import jax
@@ -131,19 +130,19 @@ def train_step(train_state, batch, value_coef, entropy_coef):
 def main():
     args = parse_args()
 
-    date = str(datetime.now().strftime("%d-%m_%H:%M"))
-    # These variables are specific to the repo "rl-gym-zoo"
-    # You should change them if you are just copy/paste the code
-    algo_name = Path(__file__).stem.split("_")[0].upper()
-    run_dir = Path(
-        Path(__file__).parent.resolve().parents[1], "runs", f"{args.env_id}__{algo_name}__{date}"
-    )
+    # Create run directory
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    run_name = "A2C_Flax"
+    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+
+    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
+    print(f"Saving results to {run_dir}")
 
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
 
-        wandb.init(project=args.env_id, name=algo_name, sync_tensorboard=True, config=vars(args))
+        wandb.init(project=args.env_id, name=run_name, sync_tensorboard=True, config=vars(args))
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
