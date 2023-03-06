@@ -98,22 +98,23 @@ def compute_td_target(rewards, flags, gamma):
     return jnp.array(td_target)
 
 
+def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
+    states, actions, td_target = batch
+    log_probs, td_predict = get_policy(apply_fn, params, states)
+
+    log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
+
+    advantages = td_target - td_predict
+
+    actor_loss = (-log_probs_by_actions * advantages).mean()
+    critic_loss = jnp.square(advantages).mean()
+    entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
+
+    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
+
 @functools.partial(jax.jit, static_argnums=(2, 3))
 def train_step(train_state, batch, value_coef, entropy_coef):
-    def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
-        states, actions, td_target = batch
-        log_probs, td_predict = get_policy(apply_fn, params, states)
-
-        log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
-
-        advantages = td_target - td_predict
-
-        actor_loss = (-log_probs_by_actions * advantages).mean()
-        critic_loss = jnp.square(advantages).mean()
-        entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
-
-        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
-
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(
         train_state.params,
