@@ -133,9 +133,7 @@ def train_step(train_state, batch, value_coef, entropy_coef, eps_clip):
         return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
 
     grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(
-        train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip
-    )
+    loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
     train_state = train_state.apply_gradients(grads=grads)
     return train_state, loss
 
@@ -161,8 +159,7 @@ def main():
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -216,9 +213,7 @@ def main():
             # Get action
             log_probs, state_values = get_policy(train_state.apply_fn, train_state.params, state)
             probs = np.exp(log_probs)
-            action = np.array(
-                [np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)]
-            )
+            action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
@@ -249,9 +244,7 @@ def main():
 
         _, next_state_value = get_policy(train_state.apply_fn, train_state.params, state)
 
-        advantages = compute_gae(
-            rewards, list_state_values, flags, next_state_value, args.gamma, args.gae
-        )
+        advantages = compute_gae(rewards, list_state_values, flags, next_state_value, args.gamma, args.gae)
 
         td_target = advantages + list_state_values
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
@@ -290,9 +283,7 @@ def main():
 
         # Log training metrics
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

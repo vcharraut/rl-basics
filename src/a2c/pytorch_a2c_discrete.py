@@ -129,8 +129,7 @@ def main():
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -240,9 +239,7 @@ def main():
         # Log training metrics
         writer.add_scalar("train/actor_loss", actor_loss, global_step)
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

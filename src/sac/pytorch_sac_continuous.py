@@ -64,9 +64,7 @@ class ReplayBuffer:
         self.batch_size = batch_size
         self.device = device
 
-        self.transition = namedtuple(
-            "Transition", field_names=["state", "action", "reward", "next_state", "flag"]
-        )
+        self.transition = namedtuple("Transition", field_names=["state", "action", "reward", "next_state", "flag"])
 
     def push(self, state, action, reward, next_state, flag):
         self.buffer.append(self.transition(state, action, reward, next_state, flag))
@@ -183,8 +181,7 @@ def main():
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -214,9 +211,7 @@ def main():
     target_critic2.load_state_dict(critic2.state_dict())
 
     optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
-    optimizer_critic = optim.Adam(
-        list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate
-    )
+    optimizer_critic = optim.Adam(list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate)
 
     alpha = args.alpha
 
@@ -270,9 +265,7 @@ def main():
                 next_state_actions, next_state_log_pi = actor(next_states)
                 critic1_next_target = target_critic1(next_states, next_state_actions).squeeze()
                 critic2_next_target = target_critic2(next_states, next_state_actions).squeeze()
-                min_qf_next_target = (
-                    torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
-                )
+                min_qf_next_target = torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
                 next_q_value = rewards + (1.0 - flags) * args.gamma * min_qf_next_target
 
             qf1_a_values = critic1(states, actions).squeeze()
@@ -300,35 +293,23 @@ def main():
 
                 # Update the target network (soft update)
                 for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
+                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
                 for param, target_param in zip(critic2.parameters(), target_critic2.parameters()):
-                    target_param.data.copy_(
-                        args.tau * param.data + (1 - args.tau) * target_param.data
-                    )
+                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
                 # Log training metrics
                 writer.add_scalar("train/actor_loss", actor_loss, global_step)
                 writer.add_scalar("train/critic_loss", critic_loss, global_step)
                 writer.add_scalar("train/qf1_a_values", qf1_a_values.mean(), global_step)
                 writer.add_scalar("train/qf2_a_values", qf2_a_values.mean(), global_step)
-                writer.add_scalar(
-                    "train/critic1_next_target", critic1_next_target.mean(), global_step
-                )
-                writer.add_scalar(
-                    "train/critic2_next_target", critic2_next_target.mean(), global_step
-                )
+                writer.add_scalar("train/critic1_next_target", critic1_next_target.mean(), global_step)
+                writer.add_scalar("train/critic2_next_target", critic2_next_target.mean(), global_step)
                 writer.add_scalar("train/qf1_loss", qf1_loss, global_step)
                 writer.add_scalar("train/qf2_loss", qf2_loss, global_step)
-                writer.add_scalar(
-                    "train/min_qf_next_target", min_qf_next_target.mean(), global_step
-                )
+                writer.add_scalar("train/min_qf_next_target", min_qf_next_target.mean(), global_step)
                 writer.add_scalar("train/next_q_value", next_q_value.mean(), global_step)
 
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

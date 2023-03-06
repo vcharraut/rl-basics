@@ -148,8 +148,7 @@ def main():
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -201,9 +200,7 @@ def main():
             # Get action
             log_probs, _ = get_policy(train_state.apply_fn, train_state.params, state)
             probs = np.exp(log_probs)
-            action = np.array(
-                [np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)]
-            )
+            action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
@@ -252,9 +249,7 @@ def main():
 
         # Log training metrics
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

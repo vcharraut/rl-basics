@@ -153,8 +153,7 @@ if __name__ == "__main__":
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -173,9 +172,7 @@ if __name__ == "__main__":
     policy_net = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
 
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
-    scheduler = optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates
-    )
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
     # Create buffers
     states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
@@ -276,9 +273,7 @@ if __name__ == "__main__":
                 index = batch_indexes[start:end]
 
                 # Calculate new values from minibatch
-                new_log_probs, td_predict, dist_entropy = policy_net.evaluate(
-                    states_batch[index], actions_batch[index]
-                )
+                new_log_probs, td_predict, dist_entropy = policy_net.evaluate(states_batch[index], actions_batch[index])
 
                 # Calculate ratios
                 logratio = new_log_probs - logprobs_batch[index]
@@ -292,18 +287,14 @@ if __name__ == "__main__":
 
                 # Calculate surrogates
                 surr1 = advantages_batch[index] * ratios
-                surr2 = advantages_batch[index] * torch.clamp(
-                    ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip
-                )
+                surr2 = advantages_batch[index] * torch.clamp(ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip)
 
                 # Calculate losses
                 actor_loss = -torch.min(surr1, surr2).mean()
                 critic_loss = mse_loss(td_predict, td_target_batch[index])
                 entropy_bonus = dist_entropy.mean()
 
-                loss = (
-                    actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
-                )
+                loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 
                 # Update policy network
                 optimizer.zero_grad()
@@ -320,9 +311,7 @@ if __name__ == "__main__":
         writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("train/approx_kl", approx_kl, global_step)
         writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

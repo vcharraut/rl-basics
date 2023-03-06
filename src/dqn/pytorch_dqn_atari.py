@@ -141,8 +141,7 @@ def main():
     writer = SummaryWriter(run_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
     # Set seed for reproducibility
@@ -177,9 +176,7 @@ def main():
     for global_step in tqdm(range(args.total_timesteps)):
         with torch.no_grad():
             # Exploration or intensification
-            exploration_prob = get_exploration_prob(
-                args.eps_start, args.eps_end, args.eps_decay, global_step
-            )
+            exploration_prob = get_exploration_prob(args.eps_start, args.eps_end, args.eps_decay, global_step)
 
             # Log exploration probability
             writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
@@ -240,9 +237,7 @@ def main():
             if not global_step % args.target_update_frequency:
                 target_net.load_state_dict(policy_net.state_dict())
 
-        writer.add_scalar(
-            "rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step
-        )
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
