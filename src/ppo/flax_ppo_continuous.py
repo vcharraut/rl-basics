@@ -92,11 +92,6 @@ def get_policy(apply_fn, params, state):
 
 
 @jax.jit
-def collect_log_probs(log_probs, actions):
-    return jax.vmap(lambda log_prob, action: log_prob[action])(log_probs, actions)
-
-
-@jax.jit
 def sample_action(mean, std, key):
     key, subkey = jax.random.split(key)
     return jax.random.normal(subkey, shape=mean.shape) * std + mean, key
@@ -133,27 +128,34 @@ def compute_gae(rewards, state_values, flags, next_state_value, gamma, gae):
     return advantages
 
 
-@functools.partial(jax.jit, static_argnums=(2, 3, 4))
-def train_step(train_state, batch, value_coef, entropy_coef, eps_clip):
-    def loss_fn(params, apply_fn, batch, value_coef, entropy_coef, eps_clip):
-        states, actions, old_log_probs, advantages, td_target = batch
+def loss_fn(params, apply_fn, batch, value_coef, entropy_coef, eps_clip):
+    states, actions, old_log_probs, advantages, td_target = batch
 
-        action_mean, action_std, td_predict = get_policy(apply_fn, params, states)
+    action_mean, action_std, td_predict = get_policy(apply_fn, params, states)
 
-        log_probs = get_log_probs(action_mean, action_std, actions).sum(-1)
+    log_probs = get_log_probs(action_mean, action_std, actions).sum(-1)
 
-        ratios = jnp.exp(log_probs - old_log_probs)
+    ratios = jnp.exp(log_probs - old_log_probs)
 
-        surr1 = advantages * ratios
-        surr2 = advantages * jax.lax.clamp(1.0 - eps_clip, ratios, 1.0 + eps_clip)
+    surr1 = advantages * ratios
+    surr2 = advantages * jax.lax.clamp(1.0 - eps_clip, ratios, 1.0 + eps_clip)
 
-        actor_loss = -jnp.minimum(surr1, surr2).mean()
-        critic_loss = jnp.square(td_target - td_predict).mean()
-        entropy_loss = get_entropy(action_std).sum(-1).mean()
-        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+    actor_loss = -jnp.minimum(surr1, surr2).mean()
+    critic_loss = jnp.square(td_target - td_predict).mean()
+    entropy_loss = get_entropy(action_std).sum(-1).mean()
 
-    grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
+    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
+
+@functools.partial(jax.jit, static_argnums=(2, 3, 4, 5, 6))
+def train_step(train_state, trajectories, num_minibatches, minibatch_size, value_coef, entropy_coef, eps_clip):
+    trajectories = jax.tree_util.tree_map(
+        lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]), trajectories
+    )
+    loss = 0.0
+    for batch in zip(*trajectories):
+        grad_fn = jax.value_and_grad(loss_fn)
+        loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
     train_state = train_state.apply_gradients(grads=grads)
     return train_state, loss
 
@@ -276,24 +278,19 @@ def main():
         _advantages = advantages.reshape(-1)
         _td_target = td_target.reshape(-1)
 
-        batch_indexes = np.arange(args.batch_size)
+        batch = (_states, _actions, _log_probs, _advantages, _td_target)
 
         # Update policy network
         for _ in range(args.num_optims):
-            np.random.shuffle(batch_indexes)
-            for start in range(0, args.batch_size, args.minibatch_size):
-                end = start + args.minibatch_size
-                idxes = batch_indexes[start:end]
-
-                batch = (
-                    _states[idxes],
-                    _actions[idxes],
-                    _log_probs[idxes],
-                    _advantages[idxes],
-                    _td_target[idxes],
-                )
-
-                train_state, loss = train_step(train_state, batch, args.value_coef, args.entropy_coef, args.eps_clip)
+            train_state, loss = train_step(
+                train_state,
+                batch,
+                args.num_minibatches,
+                args.minibatch_size,
+                args.value_coef,
+                args.entropy_coef,
+                args.eps_clip,
+            )
 
         # Log training metrics
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
