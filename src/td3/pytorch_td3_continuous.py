@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn, optim
-from torch.distributions import Normal, Uniform
+from torch.distributions import Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
@@ -22,9 +22,11 @@ def parse_args():
     parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--exploration_noise", type=float, default=0.1)
+    parser.add_argument("--noise_clip", type=float, default=0.5)
+    parser.add_argument("--policy_noise", type=float, default=0.2)
     parser.add_argument("--learning_start", type=int, default=25_000)
-    parser.add_argument("--policy_frequency", type=int, default=2)
+    parser.add_argument("--policy_frequency", type=int, default=4)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -50,6 +52,12 @@ def make_env(env_id, capture_video=False, run_dir=""):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.FlattenObservation(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
@@ -104,8 +112,7 @@ class ActorNet(nn.Module):
             self.network.append(nn.ReLU())
             fc_layer_value = layer_value
 
-        self.fc_mean = nn.Linear(fc_layer_value, action_shape)
-        self.fc_logstd = nn.Linear(fc_layer_value, action_shape)
+        self.network.append(nn.Linear(fc_layer_value, action_shape))
 
         # Scale and bias the output of the network to match the action space
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
@@ -115,36 +122,8 @@ class ActorNet(nn.Module):
             self.cuda()
 
     def forward(self, state):
-        log_std_max = 2
-        log_std_min = -5
-
-        output = self.network(state)
-        mean = self.fc_mean(output)
-        log_std = torch.tanh(self.fc_logstd(output))
-
-        # Rescale log_std to ensure it is within range [log_std_min, log_std_max].
-        log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
-        std = log_std.exp()
-
-        # Sample action using reparameterization trick.
-        normal = Normal(mean, std)
-        x_t = normal.rsample()
-        y_t = torch.tanh(x_t)
-
-        # Rescale and shift the action.
-        action = y_t * self.action_scale + self.action_bias
-
-        # Calculate the log probability of the sampled action.
-        log_prob = normal.log_prob(x_t)
-
-        # Enforce action bounds.
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(dim=1, keepdim=True)
-
-        # Rescale mean and shift it to match the action range.
-        mean = torch.tanh(mean) * self.action_scale + self.action_bias
-
-        return action, log_prob.squeeze()
+        output = torch.tanh(self.network(state))
+        return output * self.action_scale + self.action_bias
 
 
 class CriticNet(nn.Module):
@@ -201,16 +180,17 @@ def train(args, run_name, run_dir):
     actor = ActorNet(obversation_shape, action_shape, args.list_layer, action_low, action_high, args.device)
     critic1 = CriticNet(obversation_shape, action_shape, args.list_layer, args.device)
     critic2 = CriticNet(obversation_shape, action_shape, args.list_layer, args.device)
+
+    target_actor = ActorNet(obversation_shape, action_shape, args.list_layer, action_low, action_high, args.device)
     target_critic1 = CriticNet(obversation_shape, action_shape, args.list_layer, args.device)
     target_critic2 = CriticNet(obversation_shape, action_shape, args.list_layer, args.device)
 
+    target_actor.load_state_dict(actor.state_dict())
     target_critic1.load_state_dict(critic1.state_dict())
     target_critic2.load_state_dict(critic2.state_dict())
 
     optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
     optimizer_critic = optim.Adam(list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate)
-
-    alpha = args.alpha
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, action_shape, args.device)
@@ -229,7 +209,8 @@ def train(args, run_name, run_dir):
         else:
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, _ = actor(state_tensor)
+                action = actor(state_tensor)
+                action += torch.normal(0, actor.action_scale * args.exploration_noise)
 
         # Perform action
         action = action.cpu().numpy()
@@ -255,10 +236,19 @@ def train(args, run_name, run_dir):
 
             # Update critic
             with torch.no_grad():
-                next_state_actions, next_state_log_pi = actor(next_states)
+                clipped_noise = (
+                    torch.clamp(
+                        (torch.randn_like(actions) * args.policy_noise),
+                        -args.noise_clip,
+                        args.noise_clip,
+                    )
+                    * target_actor.action_scale
+                )
+
+                next_state_actions = torch.clamp((target_actor(next_states) + clipped_noise), action_low, action_high)
                 critic1_next_target = target_critic1(next_states, next_state_actions).squeeze()
                 critic2_next_target = target_critic2(next_states, next_state_actions).squeeze()
-                min_qf_next_target = torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
+                min_qf_next_target = torch.min(critic1_next_target, critic2_next_target)
                 next_q_value = rewards + (1.0 - flags) * args.gamma * min_qf_next_target
 
             qf1_a_values = critic1(states, actions).squeeze()
@@ -273,18 +263,14 @@ def train(args, run_name, run_dir):
 
             # Update actor
             if not global_step % args.policy_frequency:
-                for _ in range(args.policy_frequency):
-                    pi, log_pi = actor(states)
-                    qf1_pi = critic1(states, pi).squeeze()
-                    qf2_pi = critic2(states, pi).squeeze()
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                    actor_loss = (alpha * log_pi - min_qf_pi).mean()
-
+                actor_loss = -critic1(states, actor(states)).mean()
                 optimizer_actor.zero_grad()
                 actor_loss.backward()
                 optimizer_actor.step()
 
                 # Update the target network (soft update)
+                for param, target_param in zip(actor.parameters(), target_actor.parameters()):
+                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
                 for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
                 for param, target_param in zip(critic2.parameters(), target_critic2.parameters()):
@@ -347,8 +333,9 @@ def eval_and_render(args, run_dir):
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state_tensor = torch.from_numpy(state).to(args.device).float()
-            action, _ = policy(state_tensor)
+            state = torch.from_numpy(state).to(args.device).float()
+            action = policy(state)
+            action += torch.normal(0, policy.action_scale * args.exploration_noise)
 
         action = action.cpu().numpy()
         state, _, _, _, infos = env.step(action)
@@ -370,7 +357,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch"
+    run_name = "TD3_PyTorch"
     run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
