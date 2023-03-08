@@ -6,3 +6,4 @@ wandb/
 
 # Files
 benchmark.yaml
+run_*.sh
