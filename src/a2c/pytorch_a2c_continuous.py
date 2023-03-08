@@ -57,10 +57,6 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-def normalize(value):
-    return (value - value.mean()) / (value.std() + 1e-7)
-
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -112,6 +108,10 @@ class ActorCriticNet(nn.Module):
         return log_probs, critic_values, dist_entropy
 
 
+def normalize(value):
+    return (value - value.mean()) / (value.std() + 1e-7)
+
+
 def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
@@ -139,8 +139,8 @@ def train(args, run_name, run_dir):
     action_shape = envs.single_action_space.shape
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
-    optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
+    policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
+    optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create buffers
     states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
@@ -166,7 +166,7 @@ def train(args, run_name, run_dir):
                 # Get action
                 state = normalize(state)
                 state_tensor = torch.from_numpy(state).float()
-                action = policy_net(state_tensor)
+                action = policy(state_tensor)
 
             # Perform action
             action = action.cpu().numpy()
@@ -194,10 +194,10 @@ def train(args, run_name, run_dir):
 
                 break
 
+        # Compute TD target
         td_target = np.zeros_like(rewards, dtype=np.float32)
         gain = np.zeros(rewards.shape[1], dtype=np.float32)
 
-        # Compute TD target
         for i in reversed(range(td_target.shape[0])):
             terminal = 1.0 - flags[i]
             gain = rewards[i] + gain * args.gamma * terminal
@@ -216,7 +216,7 @@ def train(args, run_name, run_dir):
         batch_td_targets = torch.from_numpy(batch_td_targets)
 
         # Compute losses
-        log_probs, td_predict, dist_entropy = policy_net.evaluate(batch_states, batch_actions)
+        log_probs, td_predict, dist_entropy = policy.evaluate(batch_states, batch_actions)
         advantages = batch_td_targets - td_predict
 
         actor_loss = (-log_probs * advantages.detach()).mean()
@@ -228,7 +228,7 @@ def train(args, run_name, run_dir):
         # Update policy network
         optimizer.zero_grad()
         loss.backward()
-        clip_grad_norm_(policy_net.parameters(), args.clip_grad_norm)
+        clip_grad_norm_(policy.parameters(), args.clip_grad_norm)
         optimizer.step()
 
         # Log training metrics
@@ -236,14 +236,8 @@ def train(args, run_name, run_dir):
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Average of episodic returns (for the last 5% of the training)
-    indexes = int(len(log_episodic_returns) * 0.05)
-    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
-    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
-    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
-
     # Save final policy
-    torch.save(policy_net.state_dict(), f"{run_dir}/policy.pt")
+    torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
     print(f"Saved policy to {run_dir}/policy.pt")
 
     # Close the environment
@@ -252,8 +246,15 @@ def train(args, run_name, run_dir):
     if args.wandb:
         wandb.finish()
 
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    mean_train_return = np.mean(log_episodic_returns[-indexes:])
+    writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
-def test_and_render(args, run_dir):
+    return mean_train_return
+
+
+def eval_and_render(args, run_dir):
     # Create environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
@@ -286,11 +287,11 @@ def test_and_render(args, run_dir):
             returns = info["episode"]["r"][0]
             count_episodes += 1
             list_rewards.append(returns)
-            print(f"Episode {count_episodes}: {returns} returns")
-
-    print(f"Average returns: {np.mean(list_rewards)}")
+            print(f"-> Episode {count_episodes}: {returns} returns")
 
     env.close()
+
+    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
@@ -301,10 +302,12 @@ if __name__ == "__main__":
     run_name = "A2C_PyTorch"
     run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
 
-    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
-    print(f"Saving results to {run_dir}")
-    train(args=args, run_name=run_name, run_dir=run_dir)
+    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Results will be saved to: {run_dir}")
+    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    print(f"Training - Mean returns achieved: {mean_train_return}.")
 
     if args.capture_video:
-        print(f"Testing and capturing videos for {run_name} on {args.env_id}")
-        test_and_render(args=args, run_dir=run_dir)
+        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
+        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
