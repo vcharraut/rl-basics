@@ -38,13 +38,13 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False):
+def make_env(env_id, capture_video=False, run_dir=""):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder="/videos/",
+                video_folder=f"{run_dir}/videos",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -52,10 +52,6 @@ def make_env(env_id, capture_video=False):
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
@@ -65,7 +61,7 @@ def make_env(env_id, capture_video=False):
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, state_dim, device):
         self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size), dtype=np.int32)
+        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
         self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
         self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
 
@@ -97,21 +93,21 @@ class ReplayBuffer:
 
 
 class QNetwork(nn.Module):
-    def __init__(self, args, obversation_shape, action_shape):
+    def __init__(self, obversation_shape, action_shape, list_layer, device):
         super().__init__()
 
         fc_layer_value = np.prod(obversation_shape)
 
         self.network = nn.Sequential()
 
-        for layer_value in args.list_layer:
+        for layer_value in list_layer:
             self.network.append(nn.Linear(fc_layer_value, layer_value))
             self.network.append(nn.ReLU())
             fc_layer_value = layer_value
 
         self.network.append(nn.Linear(fc_layer_value, action_shape))
 
-        if args.device.type == "cuda":
+        if device.type == "cuda":
             self.cuda()
 
     def forward(self, state):
@@ -122,17 +118,7 @@ def get_exploration_prob(eps_start, eps_end, eps_decay, step):
     return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
-def main():
-    args = parse_args()
-
-    # Create run directory
-    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "DQN_PyTorch"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
-
-    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
-    print(f"Saving results to {run_dir}")
-
+def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
@@ -147,7 +133,7 @@ def main():
     )
 
     # Set seed for reproducibility
-    if args.seed > 0:
+    if args.seed:
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
@@ -159,17 +145,17 @@ def main():
     action_shape = env.single_action_space.n
 
     # Create the networks and the optimizer
-    policy_net = QNetwork(args, obversation_shape, action_shape)
-    target_net = QNetwork(args, obversation_shape, action_shape)
-    target_net.load_state_dict(policy_net.state_dict())
+    policy = QNetwork(obversation_shape, action_shape, args.list_layer, args.device)
+    target_policy = QNetwork(obversation_shape, action_shape, args.list_layer, args.device)
+    target_policy.load_state_dict(policy.state_dict())
 
-    optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
+    optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape, args.device)
 
     # Initialize environment
-    state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
+    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
     log_episodic_returns = []
 
@@ -190,10 +176,11 @@ def main():
             else:
                 # Intensification
                 state_torch = torch.from_numpy(state).to(args.device).float()
-                action = torch.argmax(policy_net(state_torch), dim=1)
+                action = torch.argmax(policy(state_torch), dim=1)
 
         # Perform action
-        next_state, reward, terminated, truncated, infos = env.step(action.cpu().numpy())
+        action = action.cpu().numpy()
+        next_state, reward, terminated, truncated, infos = env.step(action)
 
         # Store transition in the replay buffer
         replay_buffer.push(state, action, reward, np.logical_or(terminated, truncated))
@@ -215,13 +202,13 @@ def main():
                 states, actions, rewards, next_states, flags = replay_buffer.sample()
 
                 # Compute TD error
-                td_predict = policy_net(states).gather(1, actions).squeeze()
+                td_predict = policy(states).gather(1, actions).squeeze()
 
                 # Compute TD target
                 with torch.no_grad():
                     # Double Q-Learning
-                    action_by_qvalue = policy_net(next_states).argmax(1).unsqueeze(-1)
-                    max_q_target = target_net(next_states).gather(1, action_by_qvalue).squeeze()
+                    action_by_qvalue = policy(next_states).argmax(1).unsqueeze(-1)
+                    max_q_target = target_policy(next_states).gather(1, action_by_qvalue).squeeze()
 
                 td_target = rewards + (1.0 - flags) * args.gamma * max_q_target
 
@@ -238,15 +225,13 @@ def main():
 
             # Update target network
             if not global_step % args.target_update_frequency:
-                target_net.load_state_dict(policy_net.state_dict())
+                target_policy.load_state_dict(policy.state_dict())
 
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Average of episodic returns (for the last 5% of the training)
-    indexes = int(len(log_episodic_returns) * 0.05)
-    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
-    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
-    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
+    # Save final policy
+    torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
+    print(f"Saved policy to {run_dir}/policy.pt")
 
     # Close the environment
     env.close()
@@ -254,26 +239,72 @@ def main():
     if args.wandb:
         wandb.finish()
 
-    # Capture video of the policy
-    if args.capture_video:
-        print(f"Capturing videos and saving them to {run_dir}/videos ...")
-        env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
-        state, _ = env_test.reset()
-        count_episodes = 0
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    mean_train_return = np.mean(log_episodic_returns[-indexes:])
+    writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
-        while count_episodes < 10:
-            with torch.no_grad():
-                state = torch.from_numpy(state).to(args.device).float()
-                action = torch.argmax(policy_net(state), dim=1).cpu().numpy()
+    return mean_train_return
 
-            state, _, terminated, truncated, _ = env_test.step(action)
 
-            if terminated or truncated:
-                count_episodes += 1
+def eval_and_render(args, run_dir):
+    # Create environment
+    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
-        env_test.close()
-        print("Done!")
+    # Metadata about the environment
+    obversation_shape = env.single_observation_space.shape
+    action_shape = env.single_action_space.n
+
+    # Load policy
+    policy = QNetwork(obversation_shape, action_shape, args.list_layer, args.device)
+    policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
+    policy.eval()
+
+    count_episodes = 0
+    list_rewards = []
+
+    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+
+    # Run episodes
+    while count_episodes < 30:
+        with torch.no_grad():
+            if np.random.rand() < 0.05:
+                # Exploration
+                action = torch.randint(action_shape, (1,)).to(args.device)
+            else:
+                # Intensification
+                state_torch = torch.from_numpy(state).to(args.device).float()
+                action = torch.argmax(policy(state_torch), dim=1)
+
+        action = action.cpu().numpy()
+        state, _, _, _, infos = env.step(action)
+
+        if "final_info" in infos:
+            info = infos["final_info"][0]
+            returns = info["episode"]["r"][0]
+            count_episodes += 1
+            list_rewards.append(returns)
+            print(f"-> Episode {count_episodes}: {returns} returns")
+
+    env.close()
+
+    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+
+    # Create run directory
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    run_name = "DQN_PyTorch"
+    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+
+    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Results will be saved to: {run_dir}")
+    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    print(f"Training - Mean returns achieved: {mean_train_return}.")
+
+    if args.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
+        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
