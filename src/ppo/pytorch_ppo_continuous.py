@@ -44,29 +44,29 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False):
+def make_env(env_id, capture_video=False, run_dir=""):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder="/videos/",
+                video_folder=f"{run_dir}/videos",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.FlattenObservation(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        env = gym.wrappers.ClipAction(env)
 
         return env
 
     return thunk
+
+
+def normalize(value):
+    return (value - value.mean()) / (value.std() + 1e-7)
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -94,10 +94,10 @@ class ActorCriticNet(nn.Module):
 
             fc_layer_value = layer_value
 
-        self.actor_mean = layer_init(list_layer[-1], action_shape, std=0.01)
-        self.actor_std = layer_init(list_layer[-1], action_shape, std=0.01)
+        self.actor_mean = layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01)
+        self.actor_std = layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01)
 
-        self.critic_net.append(layer_init(list_layer[-1], 1, std=1.0))
+        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
 
         if args.device.type == "cuda":
             self.cuda()
@@ -111,9 +111,9 @@ class ActorCriticNet(nn.Module):
         action = distribution.sample()
         log_prob = distribution.log_prob(action).sum(-1)
 
-        critic_value = self.critic_net(state).squeeze()
+        critic_value = self.critic_net(state).squeeze(-1)
 
-        return action.cpu().numpy(), log_prob, critic_value
+        return action, log_prob, critic_value
 
     def evaluate(self, states, actions):
         output = self.actor_net(states)
@@ -124,7 +124,7 @@ class ActorCriticNet(nn.Module):
         log_probs = distribution.log_prob(actions).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)
 
-        critic_values = self.critic_net(states).squeeze()
+        critic_values = self.critic_net(states).squeeze(-1)
 
         return log_probs, critic_values, dist_entropy
 
@@ -132,17 +132,7 @@ class ActorCriticNet(nn.Module):
         return self.critic_net(state).squeeze(-1)
 
 
-if __name__ == "__main__":
-    args = parse_args()
-
-    # Create run directory
-    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "PPO_PyTorch"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
-
-    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
-    print(f"Saving results to {run_dir}")
-
+def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
@@ -157,7 +147,7 @@ if __name__ == "__main__":
     )
 
     # Set seed for reproducibility
-    if args.seed > 0:
+    if args.seed:
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
@@ -170,7 +160,6 @@ if __name__ == "__main__":
 
     # Create policy network and optimizer
     policy_net = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
-
     optimizer = optim.Adam(policy_net.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
@@ -185,7 +174,7 @@ if __name__ == "__main__":
     log_episodic_returns = []
 
     # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
+    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
     global_step = 0
     start_time = time.process_time()
@@ -198,10 +187,12 @@ if __name__ == "__main__":
 
             with torch.no_grad():
                 # Get action
+                state = normalize(state)
                 state_tensor = torch.from_numpy(state).to(args.device).float()
                 action, log_prob, state_value = policy_net(state_tensor)
 
             # Perform action
+            action = action.cpu().numpy()
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
@@ -247,9 +238,8 @@ if __name__ == "__main__":
 
             next_state_value = state_values[i]
 
-        td_target = (advantages + state_values).squeeze()
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
-        advantages = advantages.squeeze()
+        td_target = advantages + state_values
+        advantages = normalize(advantages)
 
         # Flatten batch
         states_batch = states.flatten(0, 1)
@@ -319,28 +309,69 @@ if __name__ == "__main__":
     print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
     writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
 
+    # Save final policy
+    torch.save(policy_net.state_dict(), f"{run_dir}/policy.pt")
+    print(f"Saved policy to {run_dir}/policy.pt")
+
     # Close the environment
     envs.close()
     writer.close()
     if args.wandb:
         wandb.finish()
 
-    # Capture video of the policy
+
+def test_and_render(args, run_dir):
+    # Create environment
+    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
+
+    # Metadata about the environment
+    obversation_shape = env.single_observation_space.shape
+    action_shape = env.single_action_space.shape
+
+    # Load policy
+    policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer).to(args.device)
+    policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
+    policy.eval()
+
+    count_episodes = 0
+    list_rewards = []
+
+    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+
+    # Run episodes
+    while count_episodes < 30:
+        with torch.no_grad():
+            state = normalize(state)
+            state_tensor = torch.from_numpy(state).to(args.device).float()
+            action, _, _ = policy(state_tensor)
+
+        action = action.cpu().numpy()
+        state, _, _, _, infos = env.step(action)
+
+        if "final_info" in infos:
+            info = infos["final_info"][0]
+            returns = info["episode"]["r"][0]
+            count_episodes += 1
+            list_rewards.append(returns)
+            print(f"Episode {count_episodes}: {returns} returns")
+
+    print(f"Average returns: {np.mean(list_rewards)}")
+
+    env.close()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    # Create run directory
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    run_name = "PPO_PyTorch"
+    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+
+    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
+    print(f"Saving results to {run_dir}")
+    train(args=args, run_name=run_name, run_dir=run_dir)
+
     if args.capture_video:
-        print(f"Capturing videos and saving them to {run_dir}/videos ...")
-        env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
-        state, _ = env_test.reset()
-        count_episodes = 0
-
-        while count_episodes < 10:
-            with torch.no_grad():
-                state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, _, _ = policy_net(state_tensor)
-
-            state, _, terminated, truncated, _ = env_test.step(action)
-
-            if terminated or truncated:
-                count_episodes += 1
-
-        env_test.close()
-        print("Done!")
+        print(f"Testing and capturing videos for {run_name} on {args.env_id}")
+        test_and_render(args=args, run_dir=run_dir)
