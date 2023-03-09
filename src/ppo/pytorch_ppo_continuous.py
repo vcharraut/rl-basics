@@ -59,6 +59,10 @@ def make_env(env_id, capture_video=False, run_dir=""):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
@@ -128,10 +132,6 @@ class ActorCriticNet(nn.Module):
         return self.critic_net(state).squeeze(-1)
 
 
-def normalize(value):
-    return (value - value.mean()) / (value.std() + 1e-7)
-
-
 def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
@@ -187,7 +187,6 @@ def train(args, run_name, run_dir):
 
             with torch.no_grad():
                 # Get action
-                state = normalize(state)
                 state_tensor = torch.from_numpy(state).to(args.device).float()
                 action, log_prob, state_value = policy(state_tensor)
 
@@ -239,7 +238,7 @@ def train(args, run_name, run_dir):
             next_state_value = state_values[i]
 
         td_target = advantages + state_values
-        advantages = normalize(advantages)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
 
         # Flatten batch
         states_batch = states.flatten(0, 1)
@@ -342,7 +341,6 @@ def eval_and_render(args, run_dir):
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state = normalize(state)
             state_tensor = torch.from_numpy(state).to(args.device).float()
             action, _, _ = policy(state_tensor)
 
