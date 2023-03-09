@@ -54,7 +54,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.AtariPreprocessing(env)
+        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
         env = gym.wrappers.FrameStack(env, 4)
 
         return env
@@ -68,7 +68,6 @@ class ActorCriticNet(nn.Module):
     @nn.compact
     def __call__(self, x):
         dtype = jnp.float32
-        x = x.astype(dtype) / 255.0
         x = nn.Conv(features=32, kernel_size=(8, 8), strides=(4, 4), name="conv1", dtype=dtype)(x)
         x = nn.relu(x)
         x = nn.Conv(features=64, kernel_size=(4, 4), strides=(2, 2), name="conv2", dtype=dtype)(x)
@@ -78,9 +77,12 @@ class ActorCriticNet(nn.Module):
         x = x.reshape((x.shape[0], -1))  # flatten
         x = nn.Dense(features=512, name="hidden", dtype=dtype)(x)
         x = nn.relu(x)
+
         logits = nn.Dense(features=self.num_actions, name="logits", dtype=dtype)(x)
         policy_log_probabilities = nn.log_softmax(logits)
+
         value = nn.Dense(features=1, name="value", dtype=dtype)(x)
+
         return policy_log_probabilities, value.squeeze()
 
 
@@ -141,6 +143,7 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
         grad_fn = jax.value_and_grad(loss_fn)
         loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
         train_state = train_state.apply_gradients(grads=grads)
+
     return train_state, loss
 
 

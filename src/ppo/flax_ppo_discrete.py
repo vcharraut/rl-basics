@@ -141,6 +141,7 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
         grad_fn = jax.value_and_grad(loss_fn)
         loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
         train_state = train_state.apply_gradients(grads=grads)
+
     return train_state, loss
 
 
@@ -273,6 +274,9 @@ def train(args, run_name, run_dir):
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
+    # Save the final policy
+    # checkpoints.save_checkpoint(ckpt_dir=run_dir, target=train_state, step=0)
+
     # Close the environment
     envs.close()
     writer.close()
@@ -290,36 +294,35 @@ def train(args, run_name, run_dir):
 def eval_and_render(args, run_dir):
     # Create environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
+    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
     # Metadata about the environment
-    # obversation_shape = env.single_observation_space.shape
-    # action_shape = env.single_action_space.n
+    action_shape = env.single_action_space.n
 
     # Load policy
-    # policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
-    # policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
-    # policy.eval()
+    policy = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
+    params = policy.init(jax.random.PRNGKey(args.seed), state)
 
-    # count_episodes = 0
+    train_state = TrainState.create(apply_fn=policy.apply, params=params)
+    # train_state = checkpoints.restore_checkpoint(ckpt_dir=run_dir, target=train_state)
+
+    count_episodes = 0
     list_rewards = []
 
-    # state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+    # Run episodes
+    while count_episodes < 30:
+        log_probs, state_values = policy_output(train_state.apply_fn, train_state.params, state)
+        probs = np.exp(log_probs)
+        action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
-    # # Run episodes
-    # while count_episodes < 30:
-    #     log_probs, _ = policy_output(train_state.apply_fn, train_state.params, state)
-    #     probs = np.exp(log_probs)
-    #     action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
+        state, _, _, _, infos = env.step(action)
 
-    #     action = action.cpu().numpy()
-    #     state, _, _, _, infos = env.step(action)
-
-    #     if "final_info" in infos:
-    #         info = infos["final_info"][0]
-    #         returns = info["episode"]["r"][0]
-    #         count_episodes += 1
-    #         list_rewards.append(returns)
-    #         print(f"-> Episode {count_episodes}: {returns} returns")
+        if "final_info" in infos:
+            info = infos["final_info"][0]
+            returns = info["episode"]["r"][0]
+            count_episodes += 1
+            list_rewards.append(returns)
+            print(f"-> Episode {count_episodes}: {returns} returns")
 
     env.close()
 

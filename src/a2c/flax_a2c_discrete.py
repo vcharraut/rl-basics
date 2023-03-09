@@ -37,13 +37,13 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False):
+def make_env(env_id, capture_video=False, run_dir=""):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
-                video_folder="/videos/",
+                video_folder=f"{run_dir}/videos",
                 episode_trigger=lambda x: x,
                 disable_logger=True,
             )
@@ -80,7 +80,7 @@ class ActorCriticNet(nn.Module):
 
 
 @functools.partial(jax.jit, static_argnums=(0,))
-def get_policy(apply_fn, params, state):
+def policy_output(apply_fn, params, state):
     return apply_fn(params, state)
 
 
@@ -100,7 +100,7 @@ def compute_td_target(rewards, flags, gamma):
 
 def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
     states, actions, td_target = batch
-    log_probs, td_predict = get_policy(apply_fn, params, states)
+    log_probs, td_predict = policy_output(apply_fn, params, states)
 
     log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
 
@@ -124,20 +124,11 @@ def train_step(train_state, batch, value_coef, entropy_coef):
         entropy_coef,
     )
     train_state = train_state.apply_gradients(grads=grads)
+
     return train_state, loss
 
 
-def main():
-    args = parse_args()
-
-    # Create run directory
-    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "A2C_Flax"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
-
-    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
-    print(f"Saving results to {run_dir}")
-
+def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
@@ -152,7 +143,7 @@ def main():
     )
 
     # Set seed for reproducibility
-    if args.seed > 0:
+    if args.seed:
         np.random.seed(args.seed)
 
     # Create vectorized environment(s)
@@ -163,26 +154,22 @@ def main():
     action_shape = envs.single_action_space.n
 
     # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed > 0 else envs.reset()
+    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
+    policy = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    initial_params = policy_net.init(jax.random.PRNGKey(args.seed), state)
+    initial_params = policy.init(jax.random.PRNGKey(args.seed), state)
 
-    train_state = TrainState.create(
-        params=initial_params,
-        apply_fn=policy_net.apply,
-        tx=optimizer,
-    )
+    train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
 
     del initial_params
 
     # Create buffers
     states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int32)
+    actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
     rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
 
@@ -198,7 +185,7 @@ def main():
             global_step += 1 * args.num_envs
 
             # Get action
-            log_probs, _ = get_policy(train_state.apply_fn, train_state.params, state)
+            log_probs, _ = policy_output(train_state.apply_fn, train_state.params, state)
             probs = np.exp(log_probs)
             action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
@@ -251,42 +238,73 @@ def main():
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Average of episodic returns (for the last 5% of the training)
-    indexes = int(len(log_episodic_returns) * 0.05)
-    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
-    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
-    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
-
     # Close the environment
     envs.close()
     writer.close()
     if args.wandb:
         wandb.finish()
 
-    # Capture video of the policy
-    if args.capture_video:
-        print(f"Capturing videos and saving them to {run_dir}/videos ...")
-        # env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
-        state, _ = envs.reset()
-        count_episodes = 0
-        sum_rewards = 0
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    mean_train_return = np.mean(log_episodic_returns[-indexes:])
+    writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
-        while count_episodes < 100:
-            log_probs, _ = get_policy(train_state.apply_fn, train_state.params, state)
-            probs = np.exp(log_probs)
-            action = np.array([np.random.choice(action_shape, p=probs[0])])
-            state, reward, terminated, _, _ = envs.step(action)
-            sum_rewards += reward
+    return mean_train_return
 
-            if terminated:
-                count_episodes += 1
-                print(f"TEST - Episode {count_episodes+1} finished with reward {sum_rewards}")
-                sum_rewards = 0
-                state, _ = envs.reset()
 
-        envs.close()
-        print("Done!")
+def eval_and_render(args, run_dir):
+    # Create environment
+    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
+
+    # Metadata about the environment
+    # obversation_shape = env.single_observation_space.shape
+    # action_shape = env.single_action_space.n
+
+    # Load policy
+    # policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
+    # policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
+    # policy.eval()
+
+    # count_episodes = 0
+    list_rewards = []
+
+    # state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+
+    # # Run episodes
+    # while count_episodes < 30:
+    #     log_probs, _ = policy_output(train_state.apply_fn, train_state.params, state)
+    #     probs = np.exp(log_probs)
+    #     action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
+
+    #     action = action.cpu().numpy()
+    #     state, _, _, _, infos = env.step(action)
+
+    #     if "final_info" in infos:
+    #         info = infos["final_info"][0]
+    #         returns = info["episode"]["r"][0]
+    #         count_episodes += 1
+    #         list_rewards.append(returns)
+    #         print(f"-> Episode {count_episodes}: {returns} returns")
+
+    env.close()
+
+    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+
+    # Create run directory
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    run_name = "A2C_Flax"
+    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+
+    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Results will be saved to: {run_dir}")
+    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    print(f"Training - Mean returns achieved: {mean_train_return}.")
+
+    if args.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
+        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")

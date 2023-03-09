@@ -157,6 +157,7 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
         grad_fn = jax.value_and_grad(loss_fn)
         loss, grads = grad_fn(train_state.params, train_state.apply_fn, batch, value_coef, entropy_coef, eps_clip)
         train_state = train_state.apply_gradients(grads=grads)
+
     return train_state, loss
 
 

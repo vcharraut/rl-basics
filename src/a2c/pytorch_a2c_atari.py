@@ -88,6 +88,7 @@ class ActorCriticNet(nn.Module):
         distribution = Categorical(logits=actor_value)
 
         action = distribution.sample()
+
         return action
 
     def evaluate(self, states, actions):

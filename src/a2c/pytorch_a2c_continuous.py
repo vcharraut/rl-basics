@@ -98,6 +98,7 @@ class ActorCriticNet(nn.Module):
         distribution = Normal(action_mean, action_std)
 
         action = distribution.sample()
+
         return action
 
     def evaluate(self, states, actions):
