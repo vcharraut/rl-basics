@@ -105,7 +105,7 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, action_shape):
+    def __init__(self, action_shape, device):
         super().__init__()
 
         self.network = nn.Sequential(
@@ -123,7 +123,7 @@ class ActorCriticNet(nn.Module):
         self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
         self.critic_net = layer_init(nn.Linear(512, 1), std=1)
 
-        if args.device.type == "cuda":
+        if device.type == "cuda":
             self.cuda()
 
     def forward(self, state):
@@ -185,7 +185,7 @@ def train(args, run_name, run_dir):
         state, _ = envs.reset()
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(action_shape)
+    policy = ActorCriticNet(action_shape, args.device)
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
@@ -371,19 +371,19 @@ def eval_and_render(args, run_dir):
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    args_ = parse_args()
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "PPO_PyTorch"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
-    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")
-    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
 
-    if args.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
-        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+    if args_.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
+        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
         print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
