@@ -20,7 +20,8 @@ select = [
   "ICN",
   "PIE",
   "Q",
-  "ARG"
+  "ARG",
+  "NPY"
 ]
 
 [tool.ruff.mccabe]
