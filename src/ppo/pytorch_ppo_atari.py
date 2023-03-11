@@ -19,8 +19,8 @@ def parse_args():
     parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--num_envs", type=int, default=8)
     parser.add_argument("--num_steps", type=int, default=128)
-    parser.add_argument("--num_minibatches", type=int, default=4)
     parser.add_argument("--num_optims", type=int, default=4)
+    parser.add_argument("--minibatch_size", type=int, default=256)
     parser.add_argument("--learning_rate", type=float, default=2.5e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
@@ -37,7 +37,7 @@ def parse_args():
 
     args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
     args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    args.num_minibatches = int(args.batch_size // args.minibatch_size)
     args.num_updates = int(args.total_timesteps // args.batch_size)
 
     return args
