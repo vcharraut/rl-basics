@@ -59,16 +59,18 @@ def make_env(env_id, capture_video=False, run_dir=""):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, state_dim, device):
-        self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.int8)
-        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
-        self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
+    def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng, device):
+        self.state_buffer = np.zeros((buffer_size,) + observation_shape, dtype=np.int8)
+        self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
+        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
         self.idx = 0
         self.size = 0
+
+        self.numpy_rng = numpy_rng
         self.device = device
 
     def push(self, state, action, reward, flag):
@@ -81,10 +83,10 @@ class ReplayBuffer:
         self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        idxs = np.random.randint(0, self.size - 1, size=self.batch_size)
+        idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
-            torch.from_numpy(self.state_buffer[idxs]).to(self.device),
+            torch.from_numpy(self.state_buffer[idxs]).float().to(self.device),
             torch.from_numpy(self.action_buffer[idxs]).unsqueeze(-1).to(self.device),
             torch.from_numpy(self.reward_buffer[idxs]).to(self.device),
             torch.from_numpy(self.state_buffer[idxs + 1]).to(self.device),
@@ -134,16 +136,21 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
     # Metadata about the environment
+    observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
+
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        torch.manual_seed(args.seed)
+        state, _ = env.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = env.reset()
 
     # Create the networks and the optimizer
     policy = QNetwork(action_shape, args.device)
@@ -153,10 +160,7 @@ def train(args, run_name, run_dir):
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, args.device)
-
-    # Initialize environment
-    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng, args.device)
 
     log_episodic_returns = []
 
@@ -171,20 +175,20 @@ def train(args, run_name, run_dir):
             # Log exploration probability
             writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
 
-            if np.random.rand() < exploration_prob:
+            if numpy_rng.random() < exploration_prob:
                 # Exploration
                 action = torch.randint(action_shape, (1,)).to(args.device)
             else:
                 # Intensification
-                state_torch = torch.from_numpy(state).to(args.device).float()
-                action = torch.argmax(policy(state_torch), dim=1)
+                action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
 
         # Perform action
         action = action.cpu().numpy()
         next_state, reward, terminated, truncated, infos = env.step(action)
 
         # Store transition in the replay buffer
-        replay_buffer.push(state, action, reward, np.logical_or(terminated, truncated))
+        flag = 1.0 - np.logical_or(terminated, truncated)
+        replay_buffer.push(state, action, reward, flag)
 
         state = next_state
 
@@ -211,7 +215,7 @@ def train(args, run_name, run_dir):
                     action_by_qvalue = policy(next_states).argmax(1).unsqueeze(-1)
                     max_q_target = target_policy(next_states).gather(1, action_by_qvalue).squeeze()
 
-                td_target = rewards + (1.0 - flags) * args.gamma * max_q_target
+                td_target = rewards + args.gamma * flags * max_q_target
 
                 # Compute loss
                 loss = mse_loss(td_predict, td_target)
@@ -237,8 +241,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     env.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
@@ -253,29 +255,29 @@ def eval_and_render(args, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
     # Metadata about the environment
-    obversation_shape = env.single_observation_space.shape
+    observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
     # Load policy
-    policy = QNetwork(obversation_shape, action_shape, args.list_layer, args.device)
+    policy = QNetwork(observation_shape, action_shape, args.list_layer, args.device)
     policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 
     count_episodes = 0
     list_rewards = []
 
+    numpy_rng = np.random.default_rng()
     state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            if np.random.rand() < 0.05:
+            if numpy_rng.random() < 0.05:
                 # Exploration
                 action = torch.randint(action_shape, (1,)).to(args.device)
             else:
                 # Intensification
-                state_torch = torch.from_numpy(state).to(args.device).float()
-                action = torch.argmax(policy(state_torch), dim=1)
+                action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
 
         action = action.cpu().numpy()
         state, _, _, _, infos = env.step(action)
