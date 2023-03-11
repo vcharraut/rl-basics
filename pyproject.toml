@@ -3,4 +3,25 @@ line-length = 120
 
 [tool.ruff]
 line-length = 120
-select = ["E", "F", "UP", "C4", "SIM", "TCH", "I"]
+select = [
+  "E",
+  "F",
+  "W",
+  "UP",
+  "C4",
+  "C90",
+  "SIM",
+  "TCH",
+  "I",
+  "N",
+  "S",
+  "A",
+  "COM",
+  "ICN",
+  "PIE",
+  "Q",
+  "ARG"
+]
+
+[tool.ruff.mccabe]
+max-complexity = 15
