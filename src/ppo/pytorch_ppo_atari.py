@@ -70,6 +70,40 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+class RolloutBuffer:
+    def __init__(self, num_steps, num_envs, observation_shape, device):
+        self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((num_steps, num_envs), dtype=np.int64)
+        self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.log_probs = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.values = np.zeros((num_steps, num_envs), dtype=np.float32)
+
+        self.step = 0
+        self.num_steps = num_steps
+        self.device = device
+
+    def push(self, state, action, reward, flag, log_prob, value):
+        self.states[self.step] = state
+        self.actions[self.step] = action
+        self.rewards[self.step] = reward
+        self.flags[self.step] = flag
+        self.log_probs[self.step] = log_prob
+        self.values[self.step] = value
+
+        self.step = (self.step + 1) % self.num_steps
+
+    def get(self):
+        return (
+            torch.from_numpy(self.states).to(self.device),
+            torch.from_numpy(self.actions).to(self.device),
+            torch.from_numpy(self.rewards).to(self.device),
+            torch.from_numpy(self.flags).to(self.device),
+            torch.from_numpy(self.log_probs).to(self.device),
+            torch.from_numpy(self.values).to(self.device),
+        )
+
+
 class ActorCriticNet(nn.Module):
     def __init__(self, action_shape):
         super().__init__()
@@ -106,8 +140,8 @@ class ActorCriticNet(nn.Module):
 
     def evaluate(self, states, actions):
         output = self.network(states)
-        actor_value = self.actor_net(output)
-        distribution = Categorical(logits=actor_value)
+        actor_values = self.actor_net(output)
+        distribution = Categorical(logits=actor_values)
 
         log_probs = distribution.log_prob(actions)
         dist_entropy = distribution.entropy()
@@ -134,17 +168,21 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
-    obversation_shape = envs.single_observation_space.shape
+    observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
+
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        torch.manual_seed(args.seed)
+        state, _ = envs.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = envs.reset()
 
     # Create policy network and optimizer
     policy = ActorCriticNet(action_shape)
@@ -152,17 +190,9 @@ def train(args, run_name, run_dir):
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
     # Create buffers
-    states = torch.zeros((args.num_steps, args.num_envs) + obversation_shape).to(args.device)
-    actions = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-    rewards = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-    flags = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-    log_probs = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-    state_values = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
+    rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape, args.device)
 
     log_episodic_returns = []
-
-    # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
     global_step = 0
     start_time = time.process_time()
@@ -175,20 +205,17 @@ def train(args, run_name, run_dir):
 
             with torch.no_grad():
                 # Get action
-                state_tensor = torch.from_numpy(state).to(args.device).float()
-                action, log_prob, state_value = policy(state_tensor)
+                action, log_prob, value = policy(torch.from_numpy(state).to(args.device).float())
 
             # Perform action
             action = action.cpu().numpy()
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state_tensor
-            actions[i] = torch.from_numpy(action).to(args.device)
-            rewards[i] = torch.from_numpy(reward).to(args.device)
-            log_probs[i] = log_prob
-            state_values[i] = state_value
-            flags[i] = torch.from_numpy(np.logical_or(terminated, truncated)).to(args.device)
+            flag = 1.0 - np.logical_or(terminated, truncated)
+            log_prob = log_prob.cpu().numpy()
+            value = value.cpu().numpy()
+            rollout_buffer.push(state, action, reward, flag, log_prob, value)
 
             state = next_state
 
@@ -206,34 +233,34 @@ def train(args, run_name, run_dir):
 
                 break
 
+        # Get transition batch
+        states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
+
         # Compute TD target and advantages with GAE
         with torch.no_grad():
-            next_state_tensor = torch.from_numpy(next_state).to(args.device).float()
-            next_state_value = policy.critic(next_state_tensor)
+            next_value = policy.critic(torch.from_numpy(next_state).to(args.device).float())
 
-        advantages = torch.zeros(rewards.size()).to(args.device)
-        adv = torch.zeros(rewards.size(1)).to(args.device)
+        advantages = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
+        adv = torch.zeros(args.num_envs).to(args.device)
 
-        for i in reversed(range(rewards.size(0))):
-            terminal = 1.0 - flags[i]
+        for i in reversed(range(args.num_steps)):
+            returns = rewards[i] + args.gamma * flags[i] * next_value
+            delta = returns - values[i]
 
-            returns = rewards[i] + args.gamma * next_state_value * terminal
-            delta = returns - state_values[i]
-
-            adv = args.gamma * args.gae * adv * terminal + delta
+            adv = delta + args.gamma * args.gae * flags[i] * adv
             advantages[i] = adv
 
-            next_state_value = state_values[i]
+            next_value = values[i]
 
-        td_target = advantages + state_values
+        td_target = advantages + values
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
 
         # Flatten batch
-        states_batch = states.flatten(0, 1)
-        actions_batch = actions.flatten(0, 1)
-        logprobs_batch = log_probs.reshape(-1)
-        td_target_batch = td_target.reshape(-1)
-        advantages_batch = advantages.reshape(-1)
+        states = states.reshape(-1, *observation_shape)
+        actions = actions.reshape(-1)
+        log_probs = log_probs.reshape(-1)
+        td_target = td_target.reshape(-1)
+        advantages = advantages.reshape(-1)
 
         batch_indexes = np.arange(args.batch_size)
 
@@ -242,7 +269,7 @@ def train(args, run_name, run_dir):
         # Perform PPO update
         for _ in range(args.num_optims):
             # Shuffle batch
-            np.random.shuffle(batch_indexes)
+            numpy_rng.shuffle(batch_indexes)
 
             # Perform minibatch updates
             for start in range(0, args.batch_size, args.minibatch_size):
@@ -250,10 +277,10 @@ def train(args, run_name, run_dir):
                 index = batch_indexes[start:end]
 
                 # Calculate new values from minibatch
-                new_log_probs, td_predict, dist_entropy = policy.evaluate(states_batch[index], actions_batch[index])
+                _log_probs, td_predict, dist_entropy = policy.evaluate(states[index], actions[index])
 
                 # Calculate ratios
-                logratio = new_log_probs - logprobs_batch[index]
+                logratio = _log_probs - log_probs[index]
                 ratios = logratio.exp()
 
                 # Calculate approx_kl (http://joschu.net/blog/kl-approx.html)
@@ -263,12 +290,12 @@ def train(args, run_name, run_dir):
                     clipfracs += [((ratios - 1.0).abs() > 0.2).float().mean().item()]
 
                 # Calculate surrogates
-                surr1 = advantages_batch[index] * ratios
-                surr2 = advantages_batch[index] * torch.clamp(ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip)
+                surr1 = advantages[index] * ratios
+                surr2 = advantages[index] * torch.clamp(ratios, 1.0 - args.eps_clip, 1.0 + args.eps_clip)
 
                 # Calculate losses
                 actor_loss = -torch.min(surr1, surr2).mean()
-                critic_loss = mse_loss(td_predict, td_target_batch[index])
+                critic_loss = mse_loss(td_predict, td_target[index])
                 entropy_bonus = dist_entropy.mean()
 
                 loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
@@ -297,8 +324,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     envs.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
@@ -323,13 +348,12 @@ def eval_and_render(args, run_dir):
     count_episodes = 0
     list_rewards = []
 
-    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+    state, _ = env.reset()
 
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state_tensor = torch.from_numpy(state).to(args.device).float()
-            action, _, _ = policy(state_tensor)
+            action, _, _ = policy(torch.from_numpy(state).to(args.device).float())
 
         action = action.cpu().numpy()
         state, _, _, _, infos = env.step(action)
