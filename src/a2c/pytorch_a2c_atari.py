@@ -16,10 +16,10 @@ from tqdm import tqdm
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_id", type=str, default="PongNoFrameskip-v4")
-    parser.add_argument("--total_timesteps", type=int, default=5_000_000)
+    parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--num_envs", type=int, default=16)
     parser.add_argument("--num_steps", type=int, default=5)
-    parser.add_argument("--learning_rate", type=float, default=2.5e-4)
+    parser.add_argument("--learning_rate", type=float, default=7e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
@@ -63,6 +63,33 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+class RolloutBuffer:
+    def __init__(self, num_steps, num_envs, observation_shape):
+        self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((num_steps, num_envs), dtype=np.int64)
+        self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+
+        self.step = 0
+        self.num_steps = num_steps
+
+    def push(self, state, action, reward, flag):
+        self.states[self.step] = state
+        self.actions[self.step] = action
+        self.rewards[self.step] = reward
+        self.flags[self.step] = flag
+
+        self.step = (self.step + 1) % self.num_steps
+
+    def get(self):
+        return (
+            torch.from_numpy(self.states),
+            torch.from_numpy(self.actions),
+            torch.from_numpy(self.rewards),
+            torch.from_numpy(self.flags),
+        )
+
+
 class ActorCriticNet(nn.Module):
     def __init__(self, action_shape):
         super().__init__()
@@ -93,9 +120,8 @@ class ActorCriticNet(nn.Module):
 
     def evaluate(self, states, actions):
         output = self.network(states)
-        actor_value = self.actor_net(output)
-
-        distribution = Categorical(logits=actor_value)
+        actor_values = self.actor_net(output)
+        distribution = Categorical(logits=actor_values)
 
         log_probs = distribution.log_prob(actions)
         dist_entropy = distribution.entropy()
@@ -119,32 +145,28 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
-    obversation_shape = envs.single_observation_space.shape
+    observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
+
+    # Set seed for reproducibility
+    if args.seed:
+        torch.manual_seed(args.seed)
+        state, _ = envs.reset(seed=args.seed)
+    else:
+        state, _ = envs.reset()
 
     # Create policy network and optimizer
     policy = ActorCriticNet(action_shape)
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
-    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape)
 
     log_episodic_returns = []
-
-    # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
     global_step = 0
     start_time = time.process_time()
@@ -157,18 +179,15 @@ def train(args, run_name, run_dir):
 
             with torch.no_grad():
                 # Get action
-                state_tensor = torch.from_numpy(state).float()
-                action = policy(state_tensor)
+                action = policy(torch.from_numpy(state).float())
 
             # Perform action
             action = action.cpu().numpy()
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state
-            actions[i] = action
-            rewards[i] = reward
-            flags[i] = np.logical_or(terminated, truncated)
+            flag = 1.0 - np.logical_or(terminated, truncated)
+            rollout_buffer.push(state, action, reward, flag)
 
             state = next_state
 
@@ -186,33 +205,30 @@ def train(args, run_name, run_dir):
 
                 break
 
-        # Compute TD target
-        td_target = np.zeros_like(rewards, dtype=np.float32)
-        gain = np.zeros(rewards.shape[1], dtype=np.float32)
+        # Get transition batch
+        states, actions, rewards, flags = rollout_buffer.get()
 
-        for i in reversed(range(td_target.shape[0])):
-            terminal = 1.0 - flags[i]
-            gain = rewards[i] + gain * args.gamma * terminal
+        # Compute TD target
+        td_target = torch.zeros((args.num_steps, args.num_envs))
+        gain = torch.zeros(args.num_envs)
+
+        for i in reversed(range(args.num_steps)):
+            gain = rewards[i] + args.gamma * flags[i] * gain
             td_target[i] = gain
 
         td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
 
         # Flatten batch
-        batch_states = states.reshape(-1, *obversation_shape)
-        batch_actions = actions.reshape(-1)
-        batch_td_targets = td_target.reshape(-1)
-
-        # Convert to tensor
-        batch_states = torch.from_numpy(batch_states)
-        batch_actions = torch.from_numpy(batch_actions)
-        batch_td_targets = torch.from_numpy(batch_td_targets)
+        states = states.reshape(-1, *observation_shape)
+        actions = actions.reshape(-1)
+        td_target = td_target.reshape(-1)
 
         # Compute losses
-        log_probs, td_predict, dist_entropy = policy.evaluate(batch_states, batch_actions)
-        advantages = batch_td_targets - td_predict
+        log_probs, td_predict, dist_entropy = policy.evaluate(states, actions)
+        advantages = td_target - td_predict
 
         actor_loss = (-log_probs * advantages.detach()).mean()
-        critic_loss = mse_loss(batch_td_targets, td_predict)
+        critic_loss = mse_loss(td_target, td_predict)
         entropy_bonus = dist_entropy.mean()
 
         loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
@@ -235,8 +251,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     envs.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
@@ -261,13 +275,12 @@ def eval_and_render(args, run_dir):
     count_episodes = 0
     list_rewards = []
 
-    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+    state, _ = env.reset()
 
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state_tensor = torch.from_numpy(state).float()
-            action = policy(state_tensor)
+            action = policy(torch.from_numpy(state).float())
 
         action = action.cpu().numpy()
         state, _, _, _, infos = env.step(action)
