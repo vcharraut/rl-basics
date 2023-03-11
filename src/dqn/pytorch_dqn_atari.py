@@ -89,7 +89,7 @@ class ReplayBuffer:
             torch.from_numpy(self.state_buffer[idxs]).float().to(self.device),
             torch.from_numpy(self.action_buffer[idxs]).unsqueeze(-1).to(self.device),
             torch.from_numpy(self.reward_buffer[idxs]).to(self.device),
-            torch.from_numpy(self.state_buffer[idxs + 1]).to(self.device),
+            torch.from_numpy(self.state_buffer[idxs + 1]).float().to(self.device),
             torch.from_numpy(self.flag_buffer[idxs]).to(self.device),
         )
 
