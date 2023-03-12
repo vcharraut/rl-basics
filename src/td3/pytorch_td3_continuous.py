@@ -66,8 +66,8 @@ def make_env(env_id, capture_video=False, run_dir=""):
 
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, action_shape, numpy_rng, device):
-        self.state_buffer = np.zeros((buffer_size,) + observation_shape, dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size,) + action_shape, dtype=np.float32)
+        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
+        self.action_buffer = np.zeros((buffer_size, *action_shape), dtype=np.float32)
         self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
         self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
 

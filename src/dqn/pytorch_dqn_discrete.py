@@ -68,7 +68,7 @@ def get_exploration_prob(eps_start, eps_end, eps_decay, step):
 
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng, device):
-        self.state_buffer = np.zeros((buffer_size,) + observation_shape, dtype=np.float32)
+        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
         self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
         self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
         self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
