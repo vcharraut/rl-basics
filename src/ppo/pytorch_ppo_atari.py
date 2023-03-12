@@ -341,7 +341,7 @@ def eval_and_render(args, run_dir):
     action_shape = env.single_action_space.n
 
     # Load policy
-    policy = ActorCriticNet(action_shape).to(args.device)
+    policy = ActorCriticNet(action_shape, args.device)
     policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 

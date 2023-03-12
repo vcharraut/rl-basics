@@ -255,11 +255,10 @@ def eval_and_render(args, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
     # Metadata about the environment
-    observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
     # Load policy
-    policy = QNetwork(observation_shape, action_shape, args.list_layer, args.device)
+    policy = QNetwork(action_shape, args.device)
     policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 
