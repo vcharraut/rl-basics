@@ -1,4 +1,5 @@
 gymnasium[all]
+gymnasium[accept-rom-license]
 numpy
 torch
 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
