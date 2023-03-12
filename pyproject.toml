@@ -2,27 +2,10 @@
 line-length = 120
 
 [tool.ruff]
+exclude = ["flax_*.py"]
+ignore = ["ANN", "D", "DTZ", "T20", "B", "PLR", "INP", "FBT", "RET"]
 line-length = 120
-select = [
-  "E",
-  "F",
-  "W",
-  "UP",
-  "C4",
-  "C90",
-  "SIM",
-  "TCH",
-  "I",
-  "N",
-  "S",
-  "A",
-  "COM",
-  "ICN",
-  "PIE",
-  "Q",
-  "ARG",
-  "NPY"
-]
+select = ["ALL"]
 
 [tool.ruff.mccabe]
 max-complexity = 12
