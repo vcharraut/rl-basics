@@ -150,7 +150,8 @@ def loss_fn(params, apply_fn, batch, value_coef, entropy_coef, eps_clip):
 @functools.partial(jax.jit, static_argnums=(2, 3, 4, 5, 6))
 def train_step(train_state, trajectories, num_minibatches, minibatch_size, value_coef, entropy_coef, eps_clip):
     trajectories = jax.tree_util.tree_map(
-        lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]), trajectories
+        lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]),
+        trajectories,
     )
 
     for batch in zip(*trajectories):
@@ -175,10 +176,6 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
@@ -186,15 +183,20 @@ def train(args, run_name, run_dir):
     observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.shape
 
-    # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        state, _ = envs.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = envs.reset()
+
+    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
 
     # Create policy network and optimizer
     policy = ActorCriticNet(num_actions=np.prod(action_shape), list_layer=args.list_layer)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
-
-    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
 
     initial_params = policy.init(subkey, state)
 
@@ -203,8 +205,8 @@ def train(args, run_name, run_dir):
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + observation_shape, dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs) + action_shape, dtype=np.float32)
+    states = np.zeros((args.num_steps, args.num_envs, *observation_shape), dtype=np.float32)
+    actions = np.zeros((args.num_steps, args.num_envs, *action_shape), dtype=np.float32)
     rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     list_log_probs = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
@@ -273,7 +275,7 @@ def train(args, run_name, run_dir):
 
         # Update policy network
         for _ in range(args.num_optims):
-            permutation = np.random.permutation(args.batch_size)
+            permutation = numpy_rng.permutation(args.batch_size)
             batch = tuple(x[permutation] for x in batch)
 
             train_state, loss = train_step(

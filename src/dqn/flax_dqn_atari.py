@@ -1,4 +1,5 @@
 import argparse
+import functools
 import time
 from datetime import datetime
 
@@ -79,17 +80,24 @@ class QNetwork(nn.Module):
         return x
 
 
+@functools.partial(jax.jit, static_argnums=(0,))
+def policy_output(apply_fn, params, state):
+    return apply_fn(params, state)
+
+
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, state_dim):
-        self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.int8)
-        self.action_buffer = np.zeros((buffer_size), dtype=np.int32)
-        self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
+    def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng):
+        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.int8)
+        self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
+        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
         self.idx = 0
         self.size = 0
+
+        self.numpy_rng = numpy_rng
 
     def push(self, state, action, reward, flag):
         self.state_buffer[self.idx] = state
@@ -101,15 +109,15 @@ class ReplayBuffer:
         self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        idxs = np.random.randint(0, self.size - 1, size=self.batch_size)
+        idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
-        return {
-            "states": self.state_buffer[idxs],
-            "actions": self.action_buffer[idxs],
-            "rewards": self.reward_buffer[idxs],
-            "next_states": self.state_buffer[idxs + 1],
-            "flags": self.flag_buffer[idxs],
-        }
+        return (
+            self.state_buffer[idxs],
+            self.action_buffer[idxs],
+            self.reward_buffer[idxs],
+            self.state_buffer[idxs + 1],
+            self.flag_buffer[idxs],
+        )
 
 
 class TrainState(TrainState):
@@ -117,16 +125,18 @@ class TrainState(TrainState):
 
 
 def loss_fn(params, target_params, apply_fn, batch, gamma):
+    states, actions, rewards, next_states, flags = batch
+
     # Compute TD error
-    q_predict = apply_fn(params, batch["states"])
-    td_predict = jax.vmap(lambda qp, a: qp[a])(q_predict, batch["actions"])
+    q_predict = policy_output(apply_fn, params, states)
+    td_predict = jax.vmap(lambda qp, a: qp[a])(q_predict, actions)
 
     # Compute TD target with Double Q-Learning
-    action_by_qvalue = apply_fn(params, batch["next_states"]).argmax(axis=1)
-    q_target = apply_fn(target_params, batch["next_states"])
+    action_by_qvalue = policy_output(apply_fn, params, next_states).argmax(axis=1)
+    q_target = policy_output(apply_fn, target_params, next_states)
     max_q_target = jax.vmap(lambda qt, a: qt[a])(q_target, action_by_qvalue)
 
-    td_target = batch["rewards"] + (1.0 - batch["flags"]) * gamma * max_q_target
+    td_target = rewards + (1.0 - flags) * gamma * max_q_target
 
     return jnp.mean((td_predict - td_target) ** 2)
 
@@ -136,6 +146,7 @@ def train_step(train_state, batch, gamma):
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(train_state.params, train_state.target_params, train_state.apply_fn, batch, gamma)
     train_state = train_state.apply_gradients(grads=grads)
+
     return train_state, loss
 
 
@@ -143,17 +154,7 @@ def get_exploration_prob(eps_start, eps_end, eps_decay, step):
     return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
-def main():
-    args = parse_args()
-
-    # Create run directory
-    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "DQN_Flax"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
-
-    print(f"Training {run_name} on {args.env_id} for {args.total_timesteps} timesteps")
-    print(f"Saving results to {run_dir}")
-
+def train(args, run_name, run_dir):
     # Initialize wandb if needed (https://wandb.ai/)
     if args.wandb:
         import wandb
@@ -167,10 +168,6 @@ def main():
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed > 0:
-        np.random.seed(args.seed)
-
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
@@ -178,21 +175,24 @@ def main():
     observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
-    # Initialize environment
-    state, _ = env.reset(seed=args.seed) if args.seed > 0 else env.reset()
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        state, _ = env.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = env.reset()
+
+    key = jax.random.PRNGKey(args.seed)
 
     # Create the networks and the optimizer
-    policy_net = QNetwork(num_actions=action_shape)
-    initial_params = policy_net.init(jax.random.PRNGKey(args.seed), state)
+    policy = QNetwork(num_actions=action_shape)
+    initial_params = policy.init(key, state)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    # Jit the train step
-    policy_net.apply = jax.jit(policy_net.apply)
-
-    # Create the train state
     train_state = TrainState.create(
-        apply_fn=policy_net.apply,
+        apply_fn=policy.apply,
         params=initial_params,
         target_params=initial_params,
         tx=optimizer,
@@ -201,7 +201,7 @@ def main():
     del initial_params
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng)
 
     log_episodic_returns = []
 
@@ -215,12 +215,12 @@ def main():
         # Log exploration probability
         writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
 
-        if np.random.rand() < exploration_prob:
+        if numpy_rng.random() < exploration_prob:
             # Exploration
-            action = np.random.randint(0, action_shape, size=env.num_envs)
+            action = numpy_rng.integers(0, action_shape, size=env.num_envs)
         else:
             # Intensification
-            q_values = policy_net.apply(train_state.params, state)
+            q_values = policy_output(train_state.apply_fn, train_state.params, state)
             action = np.asarray(q_values.argmax(axis=1))
 
         # Perform action
@@ -257,38 +257,75 @@ def main():
 
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Average of episodic returns (for the last 5% of the training)
-    indexes = int(len(log_episodic_returns) * 0.05)
-    avg_final_rewards = np.mean(log_episodic_returns[-indexes:])
-    print(f"Average of the last {indexes} episodic returns: {round(avg_final_rewards, 2)}")
-    writer.add_scalar("rollout/avg_final_rewards", avg_final_rewards, global_step)
+    # Save the final policy
+    # flax.training.checkpoints.save_checkpoint(ckpt_dir=run_dir, target=train_state, step=0)
 
     # Close the environment
     env.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
-    # Capture video of the policy
-    # if args.capture_video:
-    #     print(f"Capturing videos and saving them to {run_dir}/videos ...")
-    #     env_test = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True)])
-    #     state, _ = env_test.reset()
-    #     count_episodes = 0
+    # Average of episodic returns (for the last 5% of the training)
+    indexes = int(len(log_episodic_returns) * 0.05)
+    mean_train_return = np.mean(log_episodic_returns[-indexes:])
+    writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
-    #     while count_episodes < 10:
-    #         with torch.no_grad():
-    #             state = torch.from_numpy(state).to(args.device).float()
-    #             action = torch.argmax(policy_net(state), dim=1).cpu().numpy()
+    return mean_train_return
 
-    #         state, _, terminated, truncated, _ = env_test.step(action)
 
-    #         if terminated or truncated:
-    #             count_episodes += 1
+def eval_and_render(args, run_dir):
+    # Create environment
+    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
+    # state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
-    #     env_test.close()
-    #     print("Done!")
+    # Metadata about the environment
+    # action_shape = env.single_action_space.n
+
+    # Load policy
+    # policy = QNetwork(num_actions=action_shape)
+    # params = policy.init(jax.random.PRNGKey(args.seed), state)
+
+    # train_state = TrainState.create(apply_fn=policy.apply, params=params)
+    # train_state = flax.training.checkpoints.restore_checkpoint(ckpt_dir=run_dir, target=train_state)
+
+    # count_episodes = 0
+    list_rewards = []
+
+    # Run episodes
+    # while count_episodes < 30:
+    #     if np.random.rand() < 0.05:
+    #         action = np.random.randint(0, action_shape, size=1)
+    #     else:
+    #         q_values = policy.apply(train_state.params, state)
+    #         action = np.asarray(q_values.argmax(axis=1))
+
+    #     state, _, _, _, infos = env.step(action)
+
+    #     if "final_info" in infos:
+    #         info = infos["final_info"][0]
+    #         returns = info["episode"]["r"][0]
+    #         count_episodes += 1
+    #         list_rewards.append(returns)
+    #         print(f"-> Episode {count_episodes}: {returns} returns")
+
+    env.close()
+
+    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+
+    # Create run directory
+    run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
+    run_name = "DQN_Flax"
+    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+
+    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Results will be saved to: {run_dir}")
+    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    print(f"Training - Mean returns achieved: {mean_train_return}.")
+
+    if args.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
+        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")

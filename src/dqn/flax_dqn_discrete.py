@@ -83,16 +83,18 @@ def policy_output(apply_fn, params, state):
 
 
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, state_dim):
-        self.state_buffer = np.zeros((buffer_size,) + state_dim, dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size), dtype=np.int64)
-        self.reward_buffer = np.zeros((buffer_size), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size), dtype=np.float32)
+    def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng):
+        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
+        self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
+        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
         self.idx = 0
         self.size = 0
+
+        self.numpy_rng = numpy_rng
 
     def push(self, state, action, reward, flag):
         self.state_buffer[self.idx] = state
@@ -104,7 +106,7 @@ class ReplayBuffer:
         self.size = min(self.size + 1, self.max_size)
 
     def sample(self):
-        idxs = np.random.randint(0, self.size - 1, size=self.batch_size)
+        idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
             self.state_buffer[idxs],
@@ -163,10 +165,6 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
@@ -174,24 +172,33 @@ def train(args, run_name, run_dir):
     observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
-    # Initialize environment
-    state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        state, _ = env.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = env.reset()
+
+    key = jax.random.PRNGKey(args.seed)
 
     # Create the networks and the optimizer
     policy = QNetwork(num_actions=action_shape)
-    initial_params = policy.init(jax.random.PRNGKey(args.seed), state)
+    initial_params = policy.init(key, state)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    # Create the train state
     train_state = TrainState.create(
-        apply_fn=policy.apply, params=initial_params, target_params=initial_params, tx=optimizer
+        apply_fn=policy.apply,
+        params=initial_params,
+        target_params=initial_params,
+        tx=optimizer,
     )
 
     del initial_params
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng)
 
     log_episodic_returns = []
 
@@ -205,9 +212,9 @@ def train(args, run_name, run_dir):
         # Log exploration probability
         writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
 
-        if np.random.rand() < exploration_prob:
+        if numpy_rng.random() < exploration_prob:
             # Exploration
-            action = np.random.randint(0, action_shape, size=env.num_envs)
+            action = numpy_rng.integers(0, action_shape, size=env.num_envs)
         else:
             # Intensification
             q_values = policy_output(train_state.apply_fn, train_state.params, state)
@@ -253,8 +260,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     env.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

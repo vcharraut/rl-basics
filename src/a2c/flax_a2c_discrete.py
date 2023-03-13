@@ -142,10 +142,6 @@ def train(args, run_name, run_dir):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Set seed for reproducibility
-    if args.seed:
-        np.random.seed(args.seed)
-
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
@@ -153,22 +149,29 @@ def train(args, run_name, run_dir):
     observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
 
-    # Initialize environment
-    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
+    # Set seed for reproducibility
+    if args.seed:
+        numpy_rng = np.random.default_rng(args.seed)
+        state, _ = envs.reset(seed=args.seed)
+    else:
+        numpy_rng = np.random.default_rng()
+        state, _ = envs.reset()
+
+    key = jax.random.PRNGKey(args.seed)
 
     # Create policy network and optimizer
     policy = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
-    initial_params = policy.init(jax.random.PRNGKey(args.seed), state)
+    initial_params = policy.init(key, state)
 
     train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
 
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + observation_shape, dtype=np.float32)
+    states = np.zeros((args.num_steps, args.num_envs, *observation_shape), dtype=np.float32)
     actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
     rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
@@ -187,7 +190,7 @@ def train(args, run_name, run_dir):
             # Get action
             log_probs, _ = policy_output(train_state.apply_fn, train_state.params, state)
             probs = np.exp(log_probs)
-            action = np.array([np.random.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
+            action = np.array([numpy_rng.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
@@ -220,11 +223,7 @@ def train(args, run_name, run_dir):
         td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
 
         # Create batch
-        batch = (
-            states.reshape(-1, *observation_shape),
-            actions.reshape(-1),
-            td_target.reshape(-1),
-        )
+        batch = (states.reshape(-1, *observation_shape), actions.reshape(-1), td_target.reshape(-1))
 
         # Train
         train_state, loss = train_step(
