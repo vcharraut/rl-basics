@@ -171,7 +171,7 @@ def train(args, run_name, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
     # Metadata about the environment
-    obversation_shape = env.single_observation_space.shape
+    observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.n
 
     # Initialize environment
@@ -191,7 +191,7 @@ def train(args, run_name, run_dir):
     del initial_params
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, obversation_shape)
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape)
 
     log_episodic_returns = []
 

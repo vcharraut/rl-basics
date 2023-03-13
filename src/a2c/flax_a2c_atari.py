@@ -153,7 +153,7 @@ def train(args, run_name, run_dir):
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
-    obversation_shape = envs.single_observation_space.shape
+    observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.n
 
     # Initialize environment
@@ -171,7 +171,7 @@ def train(args, run_name, run_dir):
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
+    states = np.zeros((args.num_steps, args.num_envs) + observation_shape, dtype=np.float32)
     actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
     rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
@@ -223,7 +223,7 @@ def train(args, run_name, run_dir):
         td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
 
         # Create batch
-        batch = (states.reshape(-1, *obversation_shape), actions.reshape(-1), td_target.reshape(-1))
+        batch = (states.reshape(-1, *observation_shape), actions.reshape(-1), td_target.reshape(-1))
 
         # Train
         train_state, loss = train_step(
@@ -256,11 +256,11 @@ def eval_and_render(args, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
     # Metadata about the environment
-    # obversation_shape = env.single_observation_space.shape
+    # observation_shape = env.single_observation_space.shape
     # action_shape = env.single_action_space.n
 
     # Load policy
-    # policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
+    # policy = ActorCriticNet(observation_shape, action_shape, args.list_layer)
     # policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     # policy.eval()
 

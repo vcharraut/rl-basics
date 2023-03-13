@@ -183,7 +183,7 @@ def train(args, run_name, run_dir):
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
-    obversation_shape = envs.single_observation_space.shape
+    observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.shape
 
     # Initialize environment
@@ -203,7 +203,7 @@ def train(args, run_name, run_dir):
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs) + obversation_shape, dtype=np.float32)
+    states = np.zeros((args.num_steps, args.num_envs) + observation_shape, dtype=np.float32)
     actions = np.zeros((args.num_steps, args.num_envs) + action_shape, dtype=np.float32)
     rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
     flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
@@ -264,7 +264,7 @@ def train(args, run_name, run_dir):
 
         # Create batch
         batch = (
-            states.reshape(-1, *obversation_shape),
+            states.reshape(-1, *observation_shape),
             actions.reshape(-1, *action_shape),
             list_log_probs.reshape(-1),
             advantages.reshape(-1),
@@ -309,11 +309,11 @@ def eval_and_render(args, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
     # Metadata about the environment
-    # obversation_shape = env.single_observation_space.shape
+    # observation_shape = env.single_observation_space.shape
     # action_shape = env.single_action_space.n
 
     # Load policy
-    # policy = ActorCriticNet(obversation_shape, action_shape, args.list_layer)
+    # policy = ActorCriticNet(observation_shape, action_shape, args.list_layer)
     # policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     # policy.eval()
 
