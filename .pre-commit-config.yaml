@@ -12,15 +12,12 @@ repos:
     args: [--autofix]
   - id: pretty-format-yaml
     args: [--autofix]
-- repo: https://github.com/psf/black
-  rev: 23.1.0
-  hooks:
-  - id: black
 - repo: https://github.com/charliermarsh/ruff-pre-commit
   rev: v0.0.254
   hooks:
   - id: ruff
-- repo: https://github.com/asottile/pyupgrade
-  rev: v3.3.1
+    args: [--fix, --exit-non-zero-on-fix]
+- repo: https://github.com/psf/black
+  rev: 23.1.0
   hooks:
-  - id: pyupgrade
+  - id: black

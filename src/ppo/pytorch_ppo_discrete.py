@@ -203,7 +203,7 @@ def train(args, run_name, run_dir):
 
     # Main loop
     for _ in tqdm(range(args.num_updates)):
-        for i in range(args.num_steps):
+        for _ in range(args.num_steps):
             # Update global step
             global_step += 1 * args.num_envs
 
