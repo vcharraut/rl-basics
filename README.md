@@ -1,13 +1,15 @@
-# rl-gym-zoo
+# r-basics
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
 [![CodeFactor](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo/badge)](https://www.codefactor.io/repository/github/valentin-cnt/rl-gym-zoo)
 
-This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework. The goal is to provide a simple and clean implementation of the algorithms, with a focus on readability and reproducibility. Each file is designed to be independent, with code that is well-commented and easy to understand (at least I hope so!). This makes it easy for users to copy and paste the code and use it at their own convenience.
+This repository aims to implement various popular RL algorithms and evaluate their performance using the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) framework.
 
-The project is written with Python, and [Pytorch](https://github.com/pytorch/pytorch) and [Flax](https://github.com/google/flax) are used as frameworks for the implementation. It supports all environments from Gymnasium, including MuJoCo and Atari environments.
+The goal is to provide a simple and clean implementation of the algorithms, with a focus on readability and reproducibility. Each file is designed to be independent, with code that is well-commented and easy to understand (at least I hope so!). This makes it easy for users to copy and paste the code and use it at their own convenience.
+
+The project is written with Python, [Pytorch](https://github.com/pytorch/pytorch) and [Flax](https://github.com/google/flax). It supports all environments from Gymnasium, including MuJoCo and Atari environments.
 
 This project is greatly inspired by [CleanRL](https://github.com/vwxyzjn/cleanrl). I highly recommend you to check it out if you are looking for a more complete and well documented RL library.
 
