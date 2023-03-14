@@ -1,7 +1,4 @@
 black
 ruff
 pre-commit
-pytype
-mypy
-snakeviz
 line-profiler
