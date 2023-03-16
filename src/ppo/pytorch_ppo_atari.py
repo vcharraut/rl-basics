@@ -64,10 +64,20 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
+def compute_advantages(rewards, flags, values, last_value, args):
+    advantages = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
+    adv = torch.zeros(args.num_envs).to(args.device)
+
+    for i in reversed(range(args.num_steps)):
+        returns = rewards[i] + args.gamma * flags[i] * last_value
+        delta = returns - values[i]
+
+        adv = delta + args.gamma * args.gae * flags[i] * adv
+        advantages[i] = adv
+
+        last_value = values[i]
+
+    return advantages
 
 
 class RolloutBuffer:
@@ -108,23 +118,46 @@ class ActorCriticNet(nn.Module):
     def __init__(self, action_shape, device):
         super().__init__()
 
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
-        )
+        self.network = self._build_net()
 
-        self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
-        self.critic_net = layer_init(nn.Linear(512, 1), std=1)
+        self.actor_net = self._build_linear(512, action_shape, std=0.01)
+        self.critic_net = self._build_linear(512, 1, std=1.0)
 
         if device.type == "cuda":
             self.cuda()
+
+    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_conv2d(self, in_size, out_size, kernel_size, stride, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Conv2d(in_size, out_size, kernel_size, stride)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self):
+        layers = nn.Sequential(
+            self._build_conv2d(4, 32, 8, stride=4),
+            nn.ReLU(),
+            self._build_conv2d(32, 64, 4, stride=2),
+            nn.ReLU(),
+            self._build_conv2d(64, 64, 3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            self._build_linear(64 * 7 * 7, 512),
+            nn.ReLU(),
+        )
+
+        return layers
 
     def forward(self, state):
         output = self.network(state)
@@ -236,24 +269,15 @@ def train(args, run_name, run_dir):
         # Get transition batch
         states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
 
-        # Compute TD target and advantages with GAE
         with torch.no_grad():
-            next_value = policy.critic(torch.from_numpy(next_state).to(args.device).float())
+            last_value = policy.critic(torch.from_numpy(next_state).to(args.device).float())
 
-        advantages = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-        adv = torch.zeros(args.num_envs).to(args.device)
-
-        for i in reversed(range(args.num_steps)):
-            returns = rewards[i] + args.gamma * flags[i] * next_value
-            delta = returns - values[i]
-
-            adv = delta + args.gamma * args.gae * flags[i] * adv
-            advantages[i] = adv
-
-            next_value = values[i]
-
+        # Calculate advantages and TD target
+        advantages = compute_advantages(rewards, flags, values, last_value, args)
         td_target = advantages + values
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Flatten batch
         states = states.reshape(-1, *observation_shape)
@@ -261,6 +285,7 @@ def train(args, run_name, run_dir):
         log_probs = log_probs.reshape(-1)
         td_target = td_target.reshape(-1)
         advantages = advantages.reshape(-1)
+        values = values.reshape(-1)
 
         batch_indexes = np.arange(args.batch_size)
 
@@ -309,12 +334,17 @@ def train(args, run_name, run_dir):
         # Annealing learning rate
         scheduler.step()
 
+        explained_var = (
+            np.nan if torch.var(td_target) == 0 else 1 - torch.var(td_target - values) / torch.var(td_target)
+        )
+
         # Log training metrics
         writer.add_scalar("train/actor_loss", actor_loss, global_step)
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("train/approx_kl", approx_kl, global_step)
         writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("train/explained_var", explained_var, global_step)
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Save final policy

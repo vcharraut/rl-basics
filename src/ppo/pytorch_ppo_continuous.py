@@ -22,7 +22,8 @@ def parse_args():
     parser.add_argument("--num_optims", type=int, default=10)
     parser.add_argument("--minibatch_size", type=int, default=64)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
     parser.add_argument("--eps_clip", type=float, default=0.2)
@@ -69,10 +70,20 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
+def compute_advantages(rewards, flags, values, last_value, args):
+    advantages = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
+    adv = torch.zeros(args.num_envs).to(args.device)
+
+    for i in reversed(range(args.num_steps)):
+        returns = rewards[i] + args.gamma * flags[i] * last_value
+        delta = returns - values[i]
+
+        adv = delta + args.gamma * args.gae * flags[i] * adv
+        advantages[i] = adv
+
+        last_value = values[i]
+
+    return advantages
 
 
 class RolloutBuffer:
@@ -110,31 +121,40 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, list_layer, device):
+    def __init__(self, observation_shape, action_shape, actor_layers, critic_layers, device):
         super().__init__()
 
-        fc_layer_value = np.prod(observation_shape)
         action_shape = np.prod(action_shape)
 
-        self.actor_net = nn.Sequential()
-        self.critic_net = nn.Sequential()
+        self.actor_net = self._build_net(observation_shape, actor_layers)
+        self.critic_net = self._build_net(observation_shape, critic_layers)
 
-        for layer_value in list_layer:
-            self.actor_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
-            self.actor_net.append(nn.Tanh())
-
-            self.critic_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
-            self.critic_net.append(nn.Tanh())
-
-            fc_layer_value = layer_value
-
-        self.actor_mean = layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01)
-        self.actor_std = layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01)
-
-        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
+        self.actor_mean = self._build_linear(actor_layers[-1], action_shape, std=0.01)
+        self.actor_std = self._build_linear(actor_layers[-1], action_shape, std=0.01)
+        self.critic_net.append(self._build_linear(critic_layers[-1], 1, std=1.0))
 
         if device.type == "cuda":
             self.cuda()
+
+    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self, observation_shape, hidden_layers):
+        layers = nn.Sequential()
+        in_size = np.prod(observation_shape)
+
+        for out_size in hidden_layers:
+            layers.append(self._build_linear(in_size, out_size))
+            layers.append(nn.Tanh())
+            in_size = out_size
+
+        return layers
 
     def forward(self, state):
         output = self.actor_net(state)
@@ -197,7 +217,7 @@ def train(args, run_name, run_dir):
         state, _ = envs.reset()
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(observation_shape, action_shape, args.list_layer, args.device)
+    policy = ActorCriticNet(observation_shape, action_shape, args.actor_layers, args.critic_layers, args.device)
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
@@ -248,24 +268,15 @@ def train(args, run_name, run_dir):
         # Get transition batch
         states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
 
-        # Compute TD target and advantages with GAE
         with torch.no_grad():
-            next_value = policy.critic(torch.from_numpy(next_state).to(args.device).float())
+            last_value = policy.critic(torch.from_numpy(next_state).to(args.device).float())
 
-        advantages = torch.zeros((args.num_steps, args.num_envs)).to(args.device)
-        adv = torch.zeros(args.num_envs).to(args.device)
-
-        for i in reversed(range(args.num_steps)):
-            returns = rewards[i] + args.gamma * flags[i] * next_value
-            delta = returns - values[i]
-
-            adv = delta + args.gamma * args.gae * flags[i] * adv
-            advantages[i] = adv
-
-            next_value = values[i]
-
+        # Calculate advantages and TD target
+        advantages = compute_advantages(rewards, flags, values, last_value, args)
         td_target = advantages + values
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Flatten batch
         states = states.reshape(-1, *observation_shape)
@@ -273,6 +284,7 @@ def train(args, run_name, run_dir):
         log_probs = log_probs.reshape(-1)
         td_target = td_target.reshape(-1)
         advantages = advantages.reshape(-1)
+        values = values.reshape(-1)
 
         batch_indexes = np.arange(args.batch_size)
 
@@ -321,12 +333,17 @@ def train(args, run_name, run_dir):
         # Annealing learning rate
         scheduler.step()
 
+        explained_var = (
+            np.nan if torch.var(td_target) == 0 else 1 - torch.var(td_target - values) / torch.var(td_target)
+        )
+
         # Log training metrics
         writer.add_scalar("train/actor_loss", actor_loss, global_step)
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
         writer.add_scalar("train/approx_kl", approx_kl, global_step)
         writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("train/explained_var", explained_var, global_step)
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Save final policy
