@@ -20,7 +20,8 @@ def parse_args():
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--num_steps", type=int, default=256)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
@@ -51,20 +52,14 @@ def make_env(env_id, capture_video=False, run_dir=""):
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
     return thunk
-
-
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-def normalize(value):
-    return (value - value.mean()) / (value.std() + 1e-7)
 
 
 class RolloutBuffer:
@@ -95,25 +90,34 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, list_layer):
+    def __init__(self, observation_shape, action_shape, actor_layers, critic_layers):
         super().__init__()
 
-        fc_layer_value = np.prod(observation_shape)
+        self.actor_net = self._build_net(observation_shape, actor_layers)
+        self.critic_net = self._build_net(observation_shape, critic_layers)
 
-        self.actor_net = nn.Sequential()
-        self.critic_net = nn.Sequential()
+        self.actor_net.append(self._build_linear(actor_layers[-1], action_shape, std=0.01))
+        self.critic_net.append(self._build_linear(critic_layers[-1], 1, std=1.0))
 
-        for layer_value in list_layer:
-            self.actor_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
-            self.actor_net.append(nn.Tanh())
+    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
 
-            self.critic_net.append(layer_init(nn.Linear(fc_layer_value, layer_value)))
-            self.critic_net.append(nn.Tanh())
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
 
-            fc_layer_value = layer_value
+        return layer
 
-        self.actor_net.append(layer_init(nn.Linear(list_layer[-1], action_shape), std=0.01))
-        self.critic_net.append(layer_init(nn.Linear(list_layer[-1], 1), std=1.0))
+    def _build_net(self, observation_shape, hidden_layers):
+        layers = nn.Sequential()
+        in_size = np.prod(observation_shape)
+
+        for out_size in hidden_layers:
+            layers.append(self._build_linear(in_size, out_size))
+            layers.append(nn.Tanh())
+            in_size = out_size
+
+        return layers
 
     def forward(self, state):
         actor_value = self.actor_net(state)
@@ -164,7 +168,7 @@ def train(args, run_name, run_dir):
         state, _ = envs.reset()
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(observation_shape, action_shape, args.list_layer)
+    policy = ActorCriticNet(observation_shape, action_shape, args.actor_layers, args.critic_layers)
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create buffers
@@ -183,7 +187,6 @@ def train(args, run_name, run_dir):
 
             with torch.no_grad():
                 # Get action
-                state = normalize(state)
                 action = policy(torch.from_numpy(state).float())
 
             # Perform action
@@ -221,7 +224,7 @@ def train(args, run_name, run_dir):
             gain = rewards[i] + args.gamma * flags[i] * gain
             td_target[i] = gain
 
-        td_target = normalize(td_target)
+        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-8)
 
         # Flatten batch
         states = states.reshape(-1, *observation_shape)
@@ -286,7 +289,6 @@ def eval_and_render(args, run_dir):
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state = normalize(state)
             action = policy(torch.from_numpy(state).float())
 
         action = action.cpu().numpy()

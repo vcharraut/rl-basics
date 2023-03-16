@@ -57,12 +57,6 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
 class RolloutBuffer:
     def __init__(self, num_steps, num_envs, observation_shape):
         self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
@@ -94,20 +88,43 @@ class ActorCriticNet(nn.Module):
     def __init__(self, action_shape):
         super().__init__()
 
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+        self.network = self._build_net()
+
+        self.actor_net = self._build_linear(512, action_shape, std=0.01)
+        self.critic_net = self._build_linear(512, 1, std=1.0)
+
+    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_conv2d(self, in_size, out_size, kernel_size, stride, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Conv2d(in_size, out_size, kernel_size, stride)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self):
+        layers = nn.Sequential(
+            self._build_conv2d(4, 32, 8, stride=4),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            self._build_conv2d(32, 64, 4, stride=2),
             nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            self._build_conv2d(64, 64, 3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            self._build_linear(64 * 7 * 7, 512),
             nn.ReLU(),
         )
 
-        self.actor_net = layer_init(nn.Linear(512, action_shape), std=0.01)
-        self.critic_net = layer_init(nn.Linear(512, 1), std=1)
+        return layers
 
     def forward(self, state):
         output = self.network(state)
@@ -216,7 +233,7 @@ def train(args, run_name, run_dir):
             gain = rewards[i] + args.gamma * flags[i] * gain
             td_target[i] = gain
 
-        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
+        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-8)
 
         # Flatten batch
         states = states.reshape(-1, *observation_shape)
