@@ -19,7 +19,8 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--exploration_noise", type=float, default=0.1)
@@ -100,21 +101,20 @@ class ReplayBuffer:
         )
 
 
-class ActorNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, list_layer, action_low, action_high, device):
+class ActorCriticNet(nn.Module):
+    def __init__(self, observation_shape, action_shape, actor_layers, critic_layers, action_low, action_high, device):
         super().__init__()
 
-        fc_layer_value = np.prod(observation_shape)
         action_shape = np.prod(action_shape)
 
-        self.network = nn.Sequential()
+        self.actor_net = self._build_net(observation_shape, actor_layers)
+        self.actor_net.append(self._build_linear(actor_layers[-1], action_shape))
 
-        for layer_value in list_layer:
-            self.network.append(nn.Linear(fc_layer_value, layer_value))
-            self.network.append(nn.ReLU())
-            fc_layer_value = layer_value
+        self.critic_net1 = self._build_net(np.prod(observation_shape) + np.prod(action_shape), critic_layers)
+        self.critic_net1.append(self._build_linear(critic_layers[-1], 1))
 
-        self.network.append(nn.Linear(fc_layer_value, action_shape))
+        self.critic_net2 = self._build_net(np.prod(observation_shape) + np.prod(action_shape), critic_layers)
+        self.critic_net2.append(self._build_linear(critic_layers[-1], 1))
 
         # Scale and bias the output of the network to match the action space
         self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
@@ -123,31 +123,34 @@ class ActorNet(nn.Module):
         if device.type == "cuda":
             self.cuda()
 
-    def forward(self, state):
-        output = torch.tanh(self.network(state))
+    def _build_linear(self, in_size, out_size, apply_init=False, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self, observation_shape, hidden_layers):
+        layers = nn.Sequential()
+        in_size = np.prod(observation_shape)
+
+        for out_size in hidden_layers:
+            layers.append(self._build_linear(in_size, out_size))
+            layers.append(nn.ReLU())
+            in_size = out_size
+
+        return layers
+
+    def actor(self, state):
+        output = torch.tanh(self.actor_net(state))
         return output * self.action_scale + self.action_bias
 
-
-class CriticNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, list_layer, device):
-        super().__init__()
-
-        fc_layer_value = np.prod(observation_shape) + np.prod(action_shape)
-
-        self.network = nn.Sequential()
-
-        for layer_value in list_layer:
-            self.network.append(nn.Linear(fc_layer_value, layer_value))
-            self.network.append(nn.ReLU())
-            fc_layer_value = layer_value
-
-        self.network.append(nn.Linear(fc_layer_value, 1))
-
-        if device.type == "cuda":
-            self.cuda()
-
-    def forward(self, state, action):
-        return self.network(torch.cat([state, action], 1))
+    def critic(self, state, action):
+        critic1 = self.critic_net1(torch.cat([state, action], 1)).squeeze()
+        critic2 = self.critic_net2(torch.cat([state, action], 1)).squeeze()
+        return critic1, critic2
 
 
 def train(args, run_name, run_dir):
@@ -183,20 +186,31 @@ def train(args, run_name, run_dir):
         state, _ = env.reset()
 
     # Create the networks and the optimizer
-    actor = ActorNet(observation_shape, action_shape, args.list_layer, action_low, action_high, args.device)
-    critic1 = CriticNet(observation_shape, action_shape, args.list_layer, args.device)
-    critic2 = CriticNet(observation_shape, action_shape, args.list_layer, args.device)
+    policy = ActorCriticNet(
+        observation_shape,
+        action_shape,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
+    )
+    target = ActorCriticNet(
+        observation_shape,
+        action_shape,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
+    )
+    target.load_state_dict(policy.state_dict())
 
-    target_actor = ActorNet(observation_shape, action_shape, args.list_layer, action_low, action_high, args.device)
-    target_critic1 = CriticNet(observation_shape, action_shape, args.list_layer, args.device)
-    target_critic2 = CriticNet(observation_shape, action_shape, args.list_layer, args.device)
-
-    target_actor.load_state_dict(actor.state_dict())
-    target_critic1.load_state_dict(critic1.state_dict())
-    target_critic2.load_state_dict(critic2.state_dict())
-
-    optimizer_actor = optim.Adam(actor.parameters(), lr=args.learning_rate)
-    optimizer_critic = optim.Adam(list(critic1.parameters()) + list(critic2.parameters()), lr=args.learning_rate)
+    optimizer_actor = optim.Adam(policy.actor_net.parameters(), lr=args.learning_rate)
+    optimizer_critic = optim.Adam(
+        list(policy.critic_net1.parameters()) + list(policy.critic_net2.parameters()),
+        lr=args.learning_rate,
+    )
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(
@@ -219,8 +233,8 @@ def train(args, run_name, run_dir):
         else:
             with torch.no_grad():
                 state_tensor = torch.from_numpy(state).to(args.device).float()
-                action = actor(state_tensor)
-                action += torch.normal(0, actor.action_scale * args.exploration_noise)
+                action = policy.actor(state_tensor)
+                action += torch.normal(0, policy.action_scale * args.exploration_noise)
 
         # Perform action
         action = action.cpu().numpy()
@@ -253,17 +267,15 @@ def train(args, run_name, run_dir):
                         -args.noise_clip,
                         args.noise_clip,
                     )
-                    * target_actor.action_scale
+                    * target.action_scale
                 )
 
-                next_state_actions = torch.clamp((target_actor(next_states) + clipped_noise), action_low, action_high)
-                critic1_next_target = target_critic1(next_states, next_state_actions).squeeze()
-                critic2_next_target = target_critic2(next_states, next_state_actions).squeeze()
+                next_state_actions = torch.clamp((target.actor(next_states) + clipped_noise), action_low, action_high)
+                critic1_next_target, critic2_next_target = target.critic(next_states, next_state_actions)
                 min_qf_next_target = torch.min(critic1_next_target, critic2_next_target)
-                next_q_value = rewards + (1.0 - flags) * args.gamma * min_qf_next_target
+                next_q_value = rewards + args.gamma * flags * min_qf_next_target
 
-            qf1_a_values = critic1(states, actions).squeeze()
-            qf2_a_values = critic2(states, actions).squeeze()
+            qf1_a_values, qf2_a_values = policy.critic(states, actions)
             qf1_loss = mse_loss(qf1_a_values, next_q_value)
             qf2_loss = mse_loss(qf2_a_values, next_q_value)
             critic_loss = qf1_loss + qf2_loss
@@ -274,17 +286,18 @@ def train(args, run_name, run_dir):
 
             # Update actor
             if not global_step % args.policy_frequency:
-                actor_loss = -critic1(states, actor(states)).mean()
+                critic1, _ = policy.critic(states, policy.actor(states))
+                actor_loss = -critic1.mean()
                 optimizer_actor.zero_grad()
                 actor_loss.backward()
                 optimizer_actor.step()
 
                 # Update the target network (soft update)
-                for param, target_param in zip(actor.parameters(), target_actor.parameters()):
+                for param, target_param in zip(policy.actor_net.parameters(), target.actor_net.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(critic1.parameters(), target_critic1.parameters()):
+                for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(critic2.parameters(), target_critic2.parameters()):
+                for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
                 # Log training metrics
@@ -302,10 +315,8 @@ def train(args, run_name, run_dir):
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Save final policy
-    torch.save(actor.state_dict(), f"{run_dir}/actor.pt")
-    torch.save(critic1.state_dict(), f"{run_dir}/critic1.pt")
-    torch.save(critic2.state_dict(), f"{run_dir}/critic2.pt")
-    print(f"Saved policy to {run_dir}/actor.pt, {run_dir}/critic1.pt, {run_dir}/critic2.pt")
+    torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
+    print(f"Saved policy to {run_dir}/policy.pt")
 
     # Close the environment
     env.close()
@@ -330,7 +341,15 @@ def eval_and_render(args, run_dir):
     action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
 
     # Load policy
-    policy = ActorNet(observation_shape, action_shape, args.list_layer, action_low, action_high, args.device)
+    policy = ActorCriticNet(
+        observation_shape,
+        action_shape,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
+    )
     policy.load_state_dict(torch.load(f"{run_dir}/actor.pt"))
     policy.eval()
 
