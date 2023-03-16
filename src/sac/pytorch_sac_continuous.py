@@ -51,6 +51,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.FlattenObservation(env)
 
         return env
 
