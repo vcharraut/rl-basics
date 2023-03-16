@@ -106,19 +106,31 @@ class QNetwork(nn.Module):
     def __init__(self, observation_shape, action_shape, list_layer, device):
         super().__init__()
 
-        fc_layer_value = np.prod(observation_shape)
-
-        self.network = nn.Sequential()
-
-        for layer_value in list_layer:
-            self.network.append(nn.Linear(fc_layer_value, layer_value))
-            self.network.append(nn.ReLU())
-            fc_layer_value = layer_value
-
-        self.network.append(nn.Linear(fc_layer_value, action_shape))
+        self.network = self._build_net(observation_shape, list_layer)
+        self.network.append(self._build_linear(list_layer[-1], action_shape))
 
         if device.type == "cuda":
             self.cuda()
+
+    def _build_linear(self, in_size, out_size, apply_init=False, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self, observation_shape, hidden_layers):
+        layers = nn.Sequential()
+        in_size = np.prod(observation_shape)
+
+        for out_size in hidden_layers:
+            layers.append(self._build_linear(in_size, out_size))
+            layers.append(nn.ReLU())
+            in_size = out_size
+
+        return layers
 
     def forward(self, state):
         return self.network(state)

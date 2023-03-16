@@ -58,6 +58,10 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
+def get_exploration_prob(eps_start, eps_end, eps_decay, step):
+    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
+
+
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng, device):
         self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.int8)
@@ -98,28 +102,47 @@ class QNetwork(nn.Module):
     def __init__(self, action_shape, device):
         super().__init__()
 
-        self.network = nn.Sequential(
-            nn.Conv2d(4, 32, 8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 512),
-            nn.ReLU(),
-            nn.Linear(512, action_shape),
-        )
+        self.network = self._build_net(action_shape)
 
         if device.type == "cuda":
             self.cuda()
 
+    def _build_conv2d(self, in_size, out_size, kernel_size, stride, apply_init=False, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Conv2d(in_size, out_size, kernel_size, stride)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_linear(self, in_size, out_size, apply_init=False, std=np.sqrt(2), bias_const=0.0):
+        layer = nn.Linear(in_size, out_size)
+
+        if apply_init:
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+
+        return layer
+
+    def _build_net(self, action_shape):
+        layers = nn.Sequential(
+            self._build_conv2d(4, 32, 8, stride=4),
+            nn.ReLU(),
+            self._build_conv2d(32, 64, 4, stride=2),
+            nn.ReLU(),
+            self._build_conv2d(64, 64, 3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            self._build_linear(64 * 7 * 7, 512),
+            nn.ReLU(),
+            self._build_linear(512, action_shape),
+        )
+
+        return layers
+
     def forward(self, state):
         return self.network(state)
-
-
-def get_exploration_prob(eps_start, eps_end, eps_decay, step):
-    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
 def train(args, run_name, run_dir):
