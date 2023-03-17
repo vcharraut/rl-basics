@@ -20,8 +20,8 @@ def parse_args():
     parser.add_argument("--total_timesteps", type=int, default=500_000)
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--num_steps", type=int, default=2048)
-    parser.add_argument("--num_minibatches", type=int, default=32)
     parser.add_argument("--num_optims", type=int, default=4)
+    parser.add_argument("--minibatch_size", type=int, default=64)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--eps_clip", type=float, default=0.2)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
+    parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -36,7 +37,7 @@ def parse_args():
     args = parser.parse_args()
 
     args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    args.num_minibatches = int(args.batch_size // args.minibatch_size)
     args.num_updates = int(args.total_timesteps // args.batch_size)
 
     return args
@@ -66,51 +67,31 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-class ActorCriticNet(nn.Module):
-    num_actions: int
-    list_layer: list
-
-    @nn.compact
-    def __call__(self, x):
-        for layer in self.list_layer:
-            x = nn.Dense(features=layer)(x)
-            x = nn.tanh(x)
-
-        logits = nn.Dense(features=self.num_actions, name="actor")(x)
-        log_probs = nn.log_softmax(logits)
-
-        values = nn.Dense(features=1, name="critic")(x)
-
-        return log_probs, values.squeeze()
-
-
-@functools.partial(jax.jit, static_argnums=(0,))
-def policy_output(apply_fn, params, state):
-    return apply_fn(params, state)
-
-
 @jax.jit
 def collect_log_probs(log_probs, actions):
     return jax.vmap(lambda log_prob, action: log_prob[action])(log_probs, actions)
 
 
-@functools.partial(jax.jit, static_argnums=(4, 5))
-def compute_gae(rewards, state_values, flags, next_state_value, gamma, gae):
-    advantages = jnp.zeros_like(rewards)
-    adv = jnp.zeros(rewards.shape[1])
+@functools.partial(jax.jit, static_argnums=(4, 5, 6, 7))
+def compute_advantages(rewards, values, flags, last_value, gamma, gae, num_steps, num_envs):
+    advantages = jnp.zeros((num_steps, num_envs))
+    adv = jnp.zeros(num_envs)
 
-    for i in reversed(range(rewards.shape[0])):
-        terminal = 1.0 - flags[i]
+    for i in reversed(range(num_steps)):
+        returns = rewards[i] + gamma * flags[i] * last_value
+        delta = returns - values[i]
 
-        returns = rewards[i] + gamma * next_state_value * terminal
-        delta = returns - state_values[i]
-
-        adv = gamma * gae * adv * terminal + delta
+        adv = delta + gamma * gae * flags[i] * adv
         advantages = advantages.at[i].set(adv)
 
-        next_state_value = state_values[i]
+        last_value = values[i]
 
     return advantages
+
+
+@functools.partial(jax.jit, static_argnums=(0,))
+def policy_output(apply_fn, params, state):
+    return apply_fn(params, state)
 
 
 def loss_fn(params, apply_fn, batch, value_coef, entropy_coef, eps_clip):
@@ -144,6 +125,50 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
         train_state = train_state.apply_gradients(grads=grads)
 
     return train_state, loss
+
+
+class RolloutBuffer:
+    def __init__(self, num_steps, num_envs, observation_shape):
+        self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((num_steps, num_envs), dtype=np.int64)
+        self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.log_probs = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.values = np.zeros((num_steps, num_envs), dtype=np.float32)
+
+        self.step = 0
+        self.num_steps = num_steps
+
+    def push(self, state, action, reward, flag, log_prob, value):
+        self.states[self.step] = state
+        self.actions[self.step] = action
+        self.rewards[self.step] = reward
+        self.flags[self.step] = flag
+        self.log_probs[self.step] = log_prob
+        self.values[self.step] = value
+
+        self.step = (self.step + 1) % self.num_steps
+
+    def get(self):
+        return (self.states, self.actions, self.rewards, self.flags, self.log_probs, self.values)
+
+
+class ActorCriticNet(nn.Module):
+    num_actions: int
+    list_layer: list
+
+    @nn.compact
+    def __call__(self, x):
+        for layer in self.list_layer:
+            x = nn.Dense(features=layer)(x)
+            x = nn.tanh(x)
+
+        logits = nn.Dense(features=self.num_actions, name="actor")(x)
+        log_prob = nn.log_softmax(logits)
+
+        value = nn.Dense(features=1, name="critic")(x)
+
+        return log_prob, value.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -181,19 +206,16 @@ def train(args, run_name, run_dir):
     policy = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
     initial_params = policy.init(key, state)
 
-    optimizer = optax.adam(learning_rate=args.learning_rate)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
+    )
 
     train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
 
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs, *observation_shape), dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
-    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    list_log_probs = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    list_state_values = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape)
 
     log_episodic_returns = []
 
@@ -202,25 +224,21 @@ def train(args, run_name, run_dir):
 
     # Main loop
     for _ in tqdm(range(args.num_updates)):
-        for i in range(args.num_steps):
+        for _ in range(args.num_steps):
             # Update global step
             global_step += 1 * args.num_envs
 
             # Get action
-            log_probs, state_values = policy_output(train_state.apply_fn, train_state.params, state)
-            probs = np.exp(log_probs)
+            log_prob, value = policy_output(train_state.apply_fn, train_state.params, state)
+            probs = np.exp(log_prob)
             action = np.array([numpy_rng.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state
-            actions[i] = action
-            rewards[i] = reward
-            flags[i] = np.logical_or(terminated, truncated)
-            list_log_probs[i] = collect_log_probs(log_probs, action)
-            list_state_values[i] = state_values
+            flag = 1.0 - np.logical_or(terminated, truncated)
+            rollout_buffer.push(state, action, reward, flag, collect_log_probs(log_prob, action), value)
 
             state = next_state
 
@@ -238,23 +256,30 @@ def train(args, run_name, run_dir):
 
                 break
 
-        _, next_state_value = policy_output(train_state.apply_fn, train_state.params, state)
+        # Get transition batch
+        states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
 
-        advantages = compute_gae(rewards, list_state_values, flags, next_state_value, args.gamma, args.gae)
+        _, last_value = policy_output(train_state.apply_fn, train_state.params, next_state)
 
-        td_target = advantages + list_state_values
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+        # Calculate advantages and TD target
+        advantages = compute_advantages(
+            rewards, values, flags, last_value, args.gamma, args.gae, args.num_steps, args.num_envs
+        )
+        td_target = advantages + values
 
-        # Create batch
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # Flatten batch
         batch = (
             states.reshape(-1, *observation_shape),
             actions.reshape(-1),
-            list_log_probs.reshape(-1),
+            log_probs.reshape(-1),
             advantages.reshape(-1),
             td_target.reshape(-1),
         )
 
-        # Update policy network
+        # Perform PPO update
         for _ in range(args.num_optims):
             permutation = numpy_rng.permutation(args.batch_size)
             batch = tuple(x[permutation] for x in batch)
@@ -279,8 +304,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     envs.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
