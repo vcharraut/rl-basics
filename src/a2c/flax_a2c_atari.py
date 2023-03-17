@@ -50,41 +50,12 @@ def make_env(env_id, capture_video=False, run_dir=""):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.AtariPreprocessing(env, scale_obs=True)
+        env = gym.wrappers.AtariPreprocessing(env)
         env = gym.wrappers.FrameStack(env, 4)
 
         return env
 
     return thunk
-
-
-class ActorCriticNet(nn.Module):
-    num_actions: int
-
-    @nn.compact
-    def __call__(self, x):
-        dtype = jnp.float32
-        x = nn.Conv(features=32, kernel_size=(8, 8), strides=(4, 4), name="conv1", dtype=dtype)(x)
-        x = nn.relu(x)
-        x = nn.Conv(features=64, kernel_size=(4, 4), strides=(2, 2), name="conv2", dtype=dtype)(x)
-        x = nn.relu(x)
-        x = nn.Conv(features=64, kernel_size=(3, 3), strides=(1, 1), name="conv3", dtype=dtype)(x)
-        x = nn.relu(x)
-        x = x.reshape((x.shape[0], -1))  # flatten
-        x = nn.Dense(features=512, name="hidden", dtype=dtype)(x)
-        x = nn.relu(x)
-
-        logits = nn.Dense(features=self.num_actions, name="logits", dtype=dtype)(x)
-        policy_log_probabilities = nn.log_softmax(logits)
-
-        value = nn.Dense(features=1, name="value", dtype=dtype)(x)
-
-        return policy_log_probabilities, value
-
-
-@functools.partial(jax.jit, static_argnums=(0,))
-def policy_output(apply_fn, params, state):
-    return apply_fn(params, state)
 
 
 @jax.jit
@@ -93,12 +64,16 @@ def compute_td_target(rewards, flags, gamma):
     td_target = []
     gain = 0.0
     for i in reversed(range(len(rewards))):
-        terminal = 1.0 - flags[i]
-        gain = rewards[i] + gain * gamma * terminal
+        gain = rewards[i] + gamma * flags[i] * gain
         td_target.append(gain)
 
     td_target = td_target[::-1]
     return jnp.array(td_target)
+
+
+@functools.partial(jax.jit, static_argnums=(0,))
+def policy_output(apply_fn, params, state):
+    return apply_fn(params, state)
 
 
 def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
@@ -129,6 +104,51 @@ def train_step(train_state, batch, value_coef, entropy_coef):
     train_state = train_state.apply_gradients(grads=grads)
 
     return train_state, loss
+
+
+class RolloutBuffer:
+    def __init__(self, num_steps, num_envs, observation_shape):
+        self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((num_steps, num_envs), dtype=np.int64)
+        self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+
+        self.step = 0
+        self.num_steps = num_steps
+
+    def push(self, state, action, reward, flag):
+        self.states[self.step] = state
+        self.actions[self.step] = action
+        self.rewards[self.step] = reward
+        self.flags[self.step] = flag
+
+        self.step = (self.step + 1) % self.num_steps
+
+    def get(self):
+        return self.states, self.actions, self.rewards, self.flags
+
+
+class ActorCriticNet(nn.Module):
+    num_actions: int
+
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Conv(features=32, kernel_size=(8, 8), strides=(4, 4), name="conv1")(x)
+        x = nn.relu(x)
+        x = nn.Conv(features=64, kernel_size=(4, 4), strides=(2, 2), name="conv2")(x)
+        x = nn.relu(x)
+        x = nn.Conv(features=64, kernel_size=(3, 3), strides=(1, 1), name="conv3")(x)
+        x = nn.relu(x)
+        x = x.reshape((x.shape[0], -1))  # flatten
+        x = nn.Dense(features=512, name="hidden")(x)
+        x = nn.relu(x)
+
+        logits = nn.Dense(features=self.num_actions, name="actor")(x)
+        log_prob = nn.log_softmax(logits)
+
+        value = nn.Dense(features=1, name="critic")(x)
+
+        return log_prob, value.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -164,20 +184,18 @@ def train(args, run_name, run_dir):
 
     # Create policy network and optimizer
     policy = ActorCriticNet(num_actions=action_shape)
-
-    optimizer = optax.adam(learning_rate=args.learning_rate)
-
     initial_params = policy.init(key, state)
+
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
+    )
 
     train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
 
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs, *observation_shape), dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs), dtype=np.int64)
-    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape)
 
     log_episodic_returns = []
 
@@ -186,23 +204,21 @@ def train(args, run_name, run_dir):
 
     # Main loop
     for _ in tqdm(range(args.num_updates)):
-        for i in range(args.num_steps):
+        for _ in range(args.num_steps):
             # Update global step
             global_step += 1 * args.num_envs
 
             # Get action
-            log_probs, _ = policy_output(train_state.apply_fn, train_state.params, state)
-            probs = np.exp(log_probs)
+            log_prob, _ = policy_output(train_state.apply_fn, train_state.params, state)
+            probs = np.exp(log_prob)
             action = np.array([numpy_rng.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state
-            actions[i] = action
-            rewards[i] = reward
-            flags[i] = np.logical_or(terminated, truncated)
+            flag = 1.0 - np.logical_or(terminated, truncated)
+            rollout_buffer.push(state, action, reward, flag)
 
             state = next_state
 
@@ -220,6 +236,9 @@ def train(args, run_name, run_dir):
 
                 break
 
+        # Get transition batch
+        states, actions, rewards, flags = rollout_buffer.get()
+
         td_target = compute_td_target(rewards, flags, args.gamma)
 
         # Normalize td_target
@@ -229,12 +248,7 @@ def train(args, run_name, run_dir):
         batch = (states.reshape(-1, *observation_shape), actions.reshape(-1), td_target.reshape(-1))
 
         # Train
-        train_state, loss = train_step(
-            train_state,
-            batch,
-            args.value_coef,
-            args.entropy_coef,
-        )
+        train_state, loss = train_step(train_state, batch, args.value_coef, args.entropy_coef)
 
         # Log training metrics
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
@@ -243,8 +257,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     envs.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)

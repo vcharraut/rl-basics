@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
+    parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -62,33 +63,6 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-class ActorCriticNet(nn.Module):
-    num_actions: int
-    list_layer: list
-
-    @nn.compact
-    def __call__(self, x):
-        for layer in self.list_layer:
-            x = nn.Dense(features=layer)(x)
-            x = nn.tanh(x)
-
-        action_mean = nn.Dense(features=self.num_actions)(x)
-        action_std = nn.Dense(features=self.num_actions)(x)
-        action_std = nn.sigmoid(action_std) + 1e-7
-
-        # action_std = self.param("action_std", nn.initializers.zeros, (self.num_actions,))
-        # action_std = jnp.exp(action_std)
-
-        values = nn.Dense(features=1)(x).squeeze()
-
-        return action_mean, action_std, values
-
-
-@functools.partial(jax.jit, static_argnums=(0,))
-def policy_output(apply_fn, params, state):
-    return apply_fn(params, state)
-
-
 @jax.jit
 def sample_action(mean, std, key):
     key, subkey = jax.random.split(key)
@@ -96,15 +70,10 @@ def sample_action(mean, std, key):
 
 
 @jax.jit
-def get_log_probs(mean, std, value):
+def get_log_prob(mean, std, value):
     var = std**2
     log_scale = jnp.log(std)
     return -((value - mean) ** 2) / (2 * var) - log_scale - jnp.log(jnp.sqrt(2 * jnp.pi))
-
-
-@jax.jit
-def get_entropy(std):
-    return 0.5 + 0.5 * jnp.log(2 * jnp.pi) + jnp.log(std)
 
 
 @jax.jit
@@ -121,17 +90,22 @@ def compute_td_target(rewards, flags, gamma):
     return jnp.array(td_target)
 
 
+@functools.partial(jax.jit, static_argnums=(0,))
+def policy_output(apply_fn, params, state):
+    return apply_fn(params, state)
+
+
 def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
     states, actions, td_target = batch
 
     action_mean, action_std, td_predict = policy_output(apply_fn, params, states)
-    log_probs_by_actions = get_log_probs(action_mean, action_std, actions).sum(-1)
+    log_probs_by_actions = get_log_prob(action_mean, action_std, actions).sum(-1)
 
     advantages = td_target - td_predict
 
     actor_loss = (-log_probs_by_actions * advantages).mean()
     critic_loss = jnp.square(advantages).mean()
-    entropy_loss = get_entropy(action_std).sum(-1).mean()
+    entropy_loss = (0.5 + 0.5 * jnp.log(2 * jnp.pi) + jnp.log(action_std)).sum(-1).mean()
 
     return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
 
@@ -149,6 +123,47 @@ def train_step(train_state, batch, value_coef, entropy_coef):
     train_state = train_state.apply_gradients(grads=grads)
 
     return train_state, loss
+
+
+class RolloutBuffer:
+    def __init__(self, num_steps, num_envs, observation_shape, action_shape):
+        self.states = np.zeros((num_steps, num_envs, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((num_steps, num_envs, *action_shape), dtype=np.float32)
+        self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+
+        self.step = 0
+        self.num_steps = num_steps
+
+    def push(self, state, action, reward, flag):
+        self.states[self.step] = state
+        self.actions[self.step] = action
+        self.rewards[self.step] = reward
+        self.flags[self.step] = flag
+
+        self.step = (self.step + 1) % self.num_steps
+
+    def get(self):
+        return self.states, self.actions, self.rewards, self.flags
+
+
+class ActorCriticNet(nn.Module):
+    num_actions: int
+    list_layer: list
+
+    @nn.compact
+    def __call__(self, x):
+        for layer in self.list_layer:
+            x = nn.Dense(features=layer)(x)
+            x = nn.tanh(x)
+
+        action_mean = nn.Dense(features=self.num_actions)(x)
+        action_std = nn.Dense(features=self.num_actions)(x)
+        action_std = nn.sigmoid(action_std) + 1e-7
+
+        value = nn.Dense(features=1)(x)
+
+        return action_mean, action_std, value.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -179,20 +194,18 @@ def train(args, run_name, run_dir):
 
     # Create policy network and optimizer
     policy = ActorCriticNet(num_actions=np.prod(action_shape), list_layer=args.list_layer)
-
-    optimizer = optax.adam(learning_rate=args.learning_rate)
-
     initial_params = policy.init(subkey, state)
+
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
+    )
 
     train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
 
     del initial_params
 
     # Create buffers
-    states = np.zeros((args.num_steps, args.num_envs, *observation_shape), dtype=np.float32)
-    actions = np.zeros((args.num_steps, args.num_envs, *action_shape), dtype=np.float32)
-    rewards = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
-    flags = np.zeros((args.num_steps, args.num_envs), dtype=np.float32)
+    rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape, action_shape)
 
     log_episodic_returns = []
 
@@ -201,7 +214,7 @@ def train(args, run_name, run_dir):
 
     # Main loop
     for _ in tqdm(range(args.num_updates)):
-        for i in range(args.num_steps):
+        for _ in range(args.num_steps):
             # Update global step
             global_step += 1 * args.num_envs
 
@@ -215,10 +228,8 @@ def train(args, run_name, run_dir):
             next_state, reward, terminated, truncated, infos = envs.step(action)
 
             # Store transition
-            states[i] = state
-            actions[i] = action
-            rewards[i] = reward
-            flags[i] = np.logical_or(terminated, truncated)
+            flag = 1.0 - np.logical_or(terminated, truncated)
+            rollout_buffer.push(state, action, reward, flag)
 
             state = next_state
 
@@ -236,25 +247,19 @@ def train(args, run_name, run_dir):
 
                 break
 
+        # Get transition batch
+        states, actions, rewards, flags = rollout_buffer.get()
+
         td_target = compute_td_target(rewards, flags, args.gamma)
 
         # Normalize td_target
         td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
 
         # Create batch
-        batch = (
-            states.reshape(-1, *observation_shape),
-            actions.reshape(-1, *action_shape),
-            td_target.reshape(-1),
-        )
+        batch = (states.reshape(-1, *observation_shape), actions.reshape(-1, *action_shape), td_target.reshape(-1))
 
         # Train
-        train_state, loss = train_step(
-            train_state,
-            batch,
-            args.value_coef,
-            args.entropy_coef,
-        )
+        train_state, loss = train_step(train_state, batch, args.value_coef, args.entropy_coef)
 
         # Log training metrics
         writer.add_scalar("train/loss", np.asarray(loss), global_step)
@@ -263,8 +268,6 @@ def train(args, run_name, run_dir):
     # Close the environment
     envs.close()
     writer.close()
-    if args.wandb:
-        wandb.finish()
 
     # Average of episodic returns (for the last 5% of the training)
     indexes = int(len(log_episodic_returns) * 0.05)
