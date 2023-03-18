@@ -3,6 +3,7 @@ repos:
   rev: v4.4.0
   hooks:
   - id: check-yaml
+  - id: check-toml
   - id: end-of-file-fixer
   - id: trailing-whitespace
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
@@ -12,8 +13,12 @@ repos:
     args: [--autofix]
   - id: pretty-format-yaml
     args: [--autofix]
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.2.4
+  hooks:
+  - id: codespell
 - repo: https://github.com/charliermarsh/ruff-pre-commit
-  rev: v0.0.254
+  rev: v0.0.257
   hooks:
   - id: ruff
     args: [--fix, --exit-non-zero-on-fix]
