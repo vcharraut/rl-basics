@@ -42,7 +42,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -62,28 +62,17 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-class TrainState(TrainState):
-    target_params: flax.core.FrozenDict
-
-
-@functools.partial(jax.jit, static_argnums=(0,))
-def actor(apply_fn, params, state):
+@functools.partial(jax.jit, static_argnums=0)
+def actor_output(apply_fn, params, state):
     return apply_fn(params, state)
 
 
-@functools.partial(jax.jit, static_argnums=(0,))
-def critic(apply_fn, params, state, action):
-    return apply_fn(params, state, action).squeeze()
+@functools.partial(jax.jit, static_argnums=0)
+def critic_output(apply_fn, params, state, action):
+    return apply_fn(params, state, action)
 
 
-@functools.partial(
-    jax.jit,
-    static_argnums=(
-        4,
-        5,
-        6,
-    ),
-)
+@functools.partial(jax.jit, static_argnums=(4, 5, 6))
 def critic_train_step(
     critic_train_state_1,
     critic_train_state_2,
@@ -102,33 +91,28 @@ def critic_train_step(
     key, noise_key = jax.random.split(key)
 
     clipped_noise = (
-        jnp.clip(
-            (jax.random.normal(noise_key, actions.shape) * policy_noise),
-            -noise_clip,
-            noise_clip,
-        )
-        * action_scale
+        jnp.clip((jax.random.normal(noise_key, actions.shape) * policy_noise), -noise_clip, noise_clip) * action_scale
     )
 
     # Compute the target q-value
-    next_state_actions = actor(actor_train_state.apply_fn, actor_train_state.target_params, next_states)
+    next_state_actions = actor_output(actor_train_state.apply_fn, actor_train_state.target_params, next_states)
     next_state_actions = jnp.clip(next_state_actions + clipped_noise, action_low, action_high)
 
-    critic_next_target_1 = critic(
+    critic_next_target_1 = critic_output(
         critic_train_state_1.apply_fn, critic_train_state_1.target_params, next_states, next_state_actions
     )
-    critic_next_target_2 = critic(
+    critic_next_target_2 = critic_output(
         critic_train_state_2.apply_fn, critic_train_state_2.target_params, next_states, next_state_actions
     )
     min_qf_next_target = jnp.minimum(critic_next_target_1, critic_next_target_2)
 
     td_target = rewards + gamma * flags * min_qf_next_target
 
-    def critic_loss_fn(params, apply_fn):
-        td_predict = critic(apply_fn, params, states, actions)
+    def loss_fn(params, apply_fn):
+        td_predict = critic_output(apply_fn, params, states, actions)
         return jnp.mean((td_predict - td_target) ** 2)
 
-    grad_fn = jax.value_and_grad(critic_loss_fn)
+    grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(critic_train_state_1.params, critic_train_state_1.apply_fn)
     critic_train_state_1 = critic_train_state_1.apply_gradients(grads=grads)
 
@@ -142,23 +126,27 @@ def critic_train_step(
 def actor_train_step(actor_train_state, critic_train_state, batch):
     states, actions, _, _, _ = batch
 
-    def actor_loss_fn(params):
-        actions = actor(actor_train_state.apply_fn, params, states)
-        return -jnp.mean(critic(critic_train_state.apply_fn, critic_train_state.params, states, actions))
+    def loss_fn(params):
+        actions = actor_output(actor_train_state.apply_fn, params, states)
+        return -jnp.mean(critic_output(critic_train_state.apply_fn, critic_train_state.params, states, actions))
 
-    grad_fn = jax.value_and_grad(actor_loss_fn)
+    grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(actor_train_state.params)
     actor_train_state = actor_train_state.apply_gradients(grads=grads)
 
     return actor_train_state, loss
 
 
+class TrainState(TrainState):
+    target_params: flax.core.FrozenDict
+
+
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, action_shape, numpy_rng):
-        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size, *action_shape), dtype=np.float32)
-        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.states = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((buffer_size, *action_shape), dtype=np.float32)
+        self.rewards = np.zeros((buffer_size,), dtype=np.float32)
+        self.flags = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
@@ -168,10 +156,10 @@ class ReplayBuffer:
         self.numpy_rng = numpy_rng
 
     def push(self, state, action, reward, flag):
-        self.state_buffer[self.idx] = state
-        self.action_buffer[self.idx] = action
-        self.reward_buffer[self.idx] = reward
-        self.flag_buffer[self.idx] = flag
+        self.states[self.idx] = state
+        self.actions[self.idx] = action
+        self.rewards[self.idx] = reward
+        self.flags[self.idx] = flag
 
         self.idx = (self.idx + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -180,11 +168,11 @@ class ReplayBuffer:
         idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
-            self.state_buffer[idxs],
-            self.action_buffer[idxs],
-            self.reward_buffer[idxs],
-            self.state_buffer[idxs + 1],
-            self.flag_buffer[idxs],
+            self.states[idxs],
+            self.actions[idxs],
+            self.rewards[idxs],
+            self.states[idxs + 1],
+            self.flags[idxs],
         )
 
 
@@ -215,7 +203,7 @@ class CriticNet(nn.Module):
         output = nn.relu(output)
         output = nn.Dense(1)(output)
 
-        return output
+        return output.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -227,10 +215,9 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
@@ -238,6 +225,7 @@ def train(args, run_name, run_dir):
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.shape
+    action_dim = np.prod(action_shape)
     action_low = env.single_action_space.low
     action_high = env.single_action_space.high
 
@@ -255,32 +243,27 @@ def train(args, run_name, run_dir):
     action_scale = np.array((env.action_space.high - env.action_space.low) / 2.0)
     action_bias = np.array((env.action_space.high + env.action_space.low) / 2.0)
 
-    actor_net = ActorNet(action_dim=np.prod(action_shape), action_scale=action_scale, action_bias=action_bias)
+    actor_net = ActorNet(action_dim=action_dim, action_scale=action_scale, action_bias=action_bias)
     actor_initial_params = actor_net.init(actor_key, state)
 
     critic_net = CriticNet()
     critic_initial_params = critic_net.init(critic_key, state, env.action_space.sample())
 
+    optimizer = optax.adam(learning_rate=args.learning_rate)
+
     actor_train_state = TrainState.create(
-        apply_fn=actor_net.apply,
-        params=actor_initial_params,
-        target_params=actor_initial_params,
-        tx=optax.adam(learning_rate=args.learning_rate),
+        apply_fn=actor_net.apply, params=actor_initial_params, target_params=actor_initial_params, tx=optimizer
     )
 
     critic_train_state_1 = TrainState.create(
-        apply_fn=critic_net.apply,
-        params=critic_initial_params,
-        target_params=critic_initial_params,
-        tx=optax.adam(learning_rate=args.learning_rate),
+        apply_fn=critic_net.apply, params=critic_initial_params, target_params=critic_initial_params, tx=optimizer
     )
 
     critic_train_state_2 = TrainState.create(
-        apply_fn=critic_net.apply,
-        params=critic_initial_params,
-        target_params=critic_initial_params,
-        tx=optax.adam(learning_rate=args.learning_rate),
+        apply_fn=critic_net.apply, params=critic_initial_params, target_params=critic_initial_params, tx=optimizer
     )
+
+    del actor_initial_params, critic_initial_params
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, action_shape, numpy_rng)
@@ -292,13 +275,13 @@ def train(args, run_name, run_dir):
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
         if global_step < args.learning_start:
-            action = numpy_rng.uniform(low=action_low, high=action_high, size=action_shape[0])
+            action = numpy_rng.uniform(low=action_low, high=action_high, size=action_dim)
             action = np.expand_dims(action, axis=0)
         else:
-            actions = actor(actor_train_state.apply_fn, actor_train_state.params, state)
+            action = actor_output(actor_train_state.apply_fn, actor_train_state.params, state)
             action = np.array(
                 [
-                    (jax.device_get(actions)[0] + numpy_rng.normal(0, action_scale * args.exploration_noise)[0]).clip(
+                    (jax.device_get(action)[0] + numpy_rng.normal(0, action_scale * args.exploration_noise)[0]).clip(
                         action_low, action_high
                     )
                 ]
