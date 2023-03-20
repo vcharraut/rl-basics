@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_id", type=str, default="PongNoFrameskip-v4")
+    parser.add_argument("--env_id", type=str, default="ALE/Pong-v5")
     parser.add_argument("--total_timesteps", type=int, default=10_000_000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--buffer_size", type=int, default=600_000)
@@ -37,10 +37,10 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.make(env_id, frameskip=1, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
                 env=env,
                 video_folder=f"{run_dir}/videos",
@@ -48,7 +48,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
                 disable_logger=True,
             )
         else:
-            env = gym.make(env_id)
+            env = gym.make(env_id, frameskip=1)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.AtariPreprocessing(env)
         env = gym.wrappers.FrameStack(env, 4)
@@ -64,10 +64,10 @@ def get_exploration_prob(eps_start, eps_end, eps_decay, step):
 
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng, device):
-        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.int8)
-        self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
-        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.states = np.zeros((buffer_size, *observation_shape), dtype=np.int8)
+        self.actions = np.zeros((buffer_size,), dtype=np.int64)
+        self.rewards = np.zeros((buffer_size,), dtype=np.float32)
+        self.flags = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
@@ -78,10 +78,10 @@ class ReplayBuffer:
         self.device = device
 
     def push(self, state, action, reward, flag):
-        self.state_buffer[self.idx] = state
-        self.action_buffer[self.idx] = action
-        self.reward_buffer[self.idx] = reward
-        self.flag_buffer[self.idx] = flag
+        self.states[self.idx] = state
+        self.actions[self.idx] = action
+        self.rewards[self.idx] = reward
+        self.flags[self.idx] = flag
 
         self.idx = (self.idx + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -90,19 +90,19 @@ class ReplayBuffer:
         idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
-            torch.from_numpy(self.state_buffer[idxs]).float().to(self.device),
-            torch.from_numpy(self.action_buffer[idxs]).unsqueeze(-1).to(self.device),
-            torch.from_numpy(self.reward_buffer[idxs]).to(self.device),
-            torch.from_numpy(self.state_buffer[idxs + 1]).float().to(self.device),
-            torch.from_numpy(self.flag_buffer[idxs]).to(self.device),
+            torch.from_numpy(self.states[idxs]).float().to(self.device),
+            torch.from_numpy(self.actions[idxs]).unsqueeze(-1).to(self.device),
+            torch.from_numpy(self.rewards[idxs]).to(self.device),
+            torch.from_numpy(self.states[idxs + 1]).float().to(self.device),
+            torch.from_numpy(self.flags[idxs]).to(self.device),
         )
 
 
 class QNetwork(nn.Module):
-    def __init__(self, action_shape, device):
+    def __init__(self, action_dim, device):
         super().__init__()
 
-        self.network = self._build_net(action_shape)
+        self.network = self._build_net(action_dim)
 
         if device.type == "cuda":
             self.cuda()
@@ -125,8 +125,8 @@ class QNetwork(nn.Module):
 
         return layer
 
-    def _build_net(self, action_shape):
-        layers = nn.Sequential(
+    def _build_net(self, action_dim):
+        return nn.Sequential(
             self._build_conv2d(4, 32, 8, stride=4),
             nn.ReLU(),
             self._build_conv2d(32, 64, 4, stride=2),
@@ -136,10 +136,8 @@ class QNetwork(nn.Module):
             nn.Flatten(),
             self._build_linear(64 * 7 * 7, 512),
             nn.ReLU(),
-            self._build_linear(512, action_shape),
+            self._build_linear(512, action_dim),
         )
-
-        return layers
 
     def forward(self, state):
         return self.network(state)
@@ -154,17 +152,16 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
-    action_shape = env.single_action_space.n
+    action_dim = env.single_action_space.n
 
     # Set seed for reproducibility
     if args.seed:
@@ -176,8 +173,8 @@ def train(args, run_name, run_dir):
         state, _ = env.reset()
 
     # Create the networks and the optimizer
-    policy = QNetwork(action_shape, args.device)
-    target_policy = QNetwork(action_shape, args.device)
+    policy = QNetwork(action_dim, args.device)
+    target_policy = QNetwork(action_dim, args.device)
     target_policy.load_state_dict(policy.state_dict())
 
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
@@ -200,7 +197,7 @@ def train(args, run_name, run_dir):
 
             if numpy_rng.random() < exploration_prob:
                 # Exploration
-                action = torch.randint(action_shape, (1,)).to(args.device)
+                action = torch.randint(action_dim, (1,)).to(args.device)
             else:
                 # Intensification
                 action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
@@ -278,10 +275,10 @@ def eval_and_render(args, run_dir):
     env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
 
     # Metadata about the environment
-    action_shape = env.single_action_space.n
+    action_dim = env.single_action_space.n
 
     # Load policy
-    policy = QNetwork(action_shape, args.device)
+    policy = QNetwork(action_dim, args.device)
     policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 
@@ -296,7 +293,7 @@ def eval_and_render(args, run_dir):
         with torch.no_grad():
             if numpy_rng.random() < 0.05:
                 # Exploration
-                action = torch.randint(action_shape, (1,)).to(args.device)
+                action = torch.randint(action_dim, (1,)).to(args.device)
             else:
                 # Intensification
                 action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
@@ -322,7 +319,8 @@ if __name__ == "__main__":
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "DQN_PyTorch"
-    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
+    env_name = args_.env_id.split("/")[1]
+    run_dir = f"runs/{env_name}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")

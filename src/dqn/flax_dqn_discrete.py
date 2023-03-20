@@ -39,7 +39,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -54,7 +54,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda state: np.clip(state, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
@@ -63,31 +63,50 @@ def make_env(env_id, capture_video=False, run_dir=""):
     return thunk
 
 
-class QNetwork(nn.Module):
-    num_actions: int
-
-    @nn.compact
-    def __call__(self, x):
-        x = nn.Dense(features=64)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=64)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=self.num_actions)(x)
-
-        return x
+def get_exploration_prob(eps_start, eps_end, eps_decay, step):
+    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
 
 
-@functools.partial(jax.jit, static_argnums=(0,))
+@functools.partial(jax.jit, static_argnums=0)
 def policy_output(apply_fn, params, state):
     return apply_fn(params, state)
 
 
+@functools.partial(jax.jit, static_argnums=2)
+def train_step(train_state, batch, gamma):
+    def loss_fn(params):
+        states, actions, rewards, next_states, flags = batch
+
+        # Compute TD error
+        q_predict = policy_output(train_state.apply_fn, params, states)
+        td_predict = jax.vmap(lambda qp, a: qp[a])(q_predict, actions)
+
+        # Compute TD target with Double Q-Learning
+        action_by_qvalue = policy_output(train_state.apply_fn, params, next_states).argmax(axis=1)
+        q_target = policy_output(train_state.apply_fn, train_state.target_params, next_states)
+        max_q_target = jax.vmap(lambda qt, a: qt[a])(q_target, action_by_qvalue)
+
+        td_target = rewards + (1.0 - flags) * gamma * max_q_target
+
+        return jnp.mean((td_predict - td_target) ** 2)
+
+    grad_fn = jax.value_and_grad(loss_fn)
+    loss, grads = grad_fn(train_state.params)
+    train_state = train_state.apply_gradients(grads=grads)
+
+    return train_state, loss
+
+
+class TrainState(TrainState):
+    target_params: flax.core.FrozenDict
+
+
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng):
-        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size,), dtype=np.int64)
-        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.states = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((buffer_size,), dtype=np.int64)
+        self.rewards = np.zeros((buffer_size,), dtype=np.float32)
+        self.flags = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
@@ -97,10 +116,10 @@ class ReplayBuffer:
         self.numpy_rng = numpy_rng
 
     def push(self, state, action, reward, flag):
-        self.state_buffer[self.idx] = state
-        self.action_buffer[self.idx] = action
-        self.reward_buffer[self.idx] = reward
-        self.flag_buffer[self.idx] = flag
+        self.states[self.idx] = state
+        self.actions[self.idx] = action
+        self.rewards[self.idx] = reward
+        self.flags[self.idx] = flag
 
         self.idx = (self.idx + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -109,46 +128,26 @@ class ReplayBuffer:
         idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
-            self.state_buffer[idxs],
-            self.action_buffer[idxs],
-            self.reward_buffer[idxs],
-            self.state_buffer[idxs + 1],
-            self.flag_buffer[idxs],
+            self.states[idxs],
+            self.actions[idxs],
+            self.rewards[idxs],
+            self.states[idxs + 1],
+            self.flags[idxs],
         )
 
 
-class TrainState(TrainState):
-    target_params: flax.core.FrozenDict
+class QNetwork(nn.Module):
+    action_dim: int
 
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Dense(features=64)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=64)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=self.action_dim)(x)
 
-def loss_fn(params, target_params, apply_fn, batch, gamma):
-    states, actions, rewards, next_states, flags = batch
-
-    # Compute TD error
-    q_predict = policy_output(apply_fn, params, states)
-    td_predict = jax.vmap(lambda qp, a: qp[a])(q_predict, actions)
-
-    # Compute TD target with Double Q-Learning
-    action_by_qvalue = policy_output(apply_fn, params, next_states).argmax(axis=1)
-    q_target = policy_output(apply_fn, target_params, next_states)
-    max_q_target = jax.vmap(lambda qt, a: qt[a])(q_target, action_by_qvalue)
-
-    td_target = rewards + (1.0 - flags) * gamma * max_q_target
-
-    return jnp.mean((td_predict - td_target) ** 2)
-
-
-@jax.jit
-def train_step(train_state, batch, gamma):
-    grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(train_state.params, train_state.target_params, train_state.apply_fn, batch, gamma)
-    train_state = train_state.apply_gradients(grads=grads)
-
-    return train_state, loss
-
-
-def get_exploration_prob(eps_start, eps_end, eps_decay, step):
-    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
+        return x
 
 
 def train(args, run_name, run_dir):
@@ -160,17 +159,16 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
 
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
-    action_shape = env.single_action_space.n
+    action_dim = env.single_action_space.n
 
     # Set seed for reproducibility
     if args.seed:
@@ -183,16 +181,13 @@ def train(args, run_name, run_dir):
     key = jax.random.PRNGKey(args.seed)
 
     # Create the networks and the optimizer
-    policy = QNetwork(num_actions=action_shape)
-    initial_params = policy.init(key, state)
+    policy_net = QNetwork(action_dim=action_dim)
+    initial_params = policy_net.init(key, state)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     train_state = TrainState.create(
-        apply_fn=policy.apply,
-        params=initial_params,
-        target_params=initial_params,
-        tx=optimizer,
+        apply_fn=policy_net.apply, params=initial_params, target_params=initial_params, tx=optimizer
     )
 
     del initial_params
@@ -214,7 +209,7 @@ def train(args, run_name, run_dir):
 
         if numpy_rng.random() < exploration_prob:
             # Exploration
-            action = numpy_rng.integers(0, action_shape, size=env.num_envs)
+            action = numpy_rng.integers(0, action_dim, size=env.num_envs)
         else:
             # Intensification
             q_values = policy_output(train_state.apply_fn, train_state.params, state)
@@ -275,10 +270,10 @@ def eval_and_render(args, run_dir):
     # state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
     # Metadata about the environment
-    # action_shape = env.single_action_space.n
+    # action_dim = env.single_action_space.n
 
     # Load policy
-    # policy = QNetwork(num_actions=action_shape)
+    # policy = QNetwork(action_dim=action_dim)
     # params = policy.init(jax.random.PRNGKey(args.seed), state)
 
     # train_state = TrainState.create(apply_fn=policy.apply, params=params)
@@ -290,7 +285,7 @@ def eval_and_render(args, run_dir):
     # Run episodes
     # while count_episodes < 30:
     #     if np.random.rand() < 0.05:
-    #         action = np.random.randint(0, action_shape, size=1)
+    #         action = np.random.randint(0, action_dim, size=1)
     #     else:
     #         q_values = policy.apply(train_state.params, state)
     #         action = np.asarray(q_values.argmax(axis=1))
@@ -310,19 +305,19 @@ def eval_and_render(args, run_dir):
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    args_ = parse_args()
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "DQN_Flax"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
-    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")
-    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
 
-    if args.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
-        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+    if args_.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
+        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
         print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
