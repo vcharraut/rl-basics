@@ -45,7 +45,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -60,7 +60,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda state: np.clip(state, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
@@ -120,13 +120,13 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, actor_layers, critic_layers, device):
+    def __init__(self, observation_shape, action_dim, actor_layers, critic_layers, device):
         super().__init__()
 
         self.actor_net = self._build_net(observation_shape, actor_layers)
         self.critic_net = self._build_net(observation_shape, critic_layers)
 
-        self.actor_net.append(self._build_linear(actor_layers[-1], action_shape, std=0.01))
+        self.actor_net.append(self._build_linear(actor_layers[-1], action_dim, std=0.01))
         self.critic_net.append(self._build_linear(critic_layers[-1], 1, std=1.0))
 
         if device.type == "cuda":
@@ -187,17 +187,16 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
     observation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.n
+    action_dim = envs.single_action_space.n
 
     # Set seed for reproducibility
     if args.seed:
@@ -209,7 +208,7 @@ def train(args, run_name, run_dir):
         state, _ = envs.reset()
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(observation_shape, action_shape, args.actor_layers, args.critic_layers, args.device)
+    policy = ActorCriticNet(observation_shape, action_dim, args.actor_layers, args.critic_layers, args.device)
     optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0 - (epoch - 1.0) / args.num_updates)
 
@@ -360,10 +359,10 @@ def eval_and_render(args, run_dir):
 
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
-    action_shape = env.single_action_space.n
+    action_dim = env.single_action_space.n
 
     # Load policy
-    policy = ActorCriticNet(observation_shape, action_shape, args.list_layer, args.device)
+    policy = ActorCriticNet(observation_shape, action_dim, args.list_layer, args.device)
     policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 
