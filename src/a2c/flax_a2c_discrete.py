@@ -18,8 +18,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_id", type=str, default="LunarLander-v2")
     parser.add_argument("--total_timesteps", type=int, default=500_000)
-    parser.add_argument("--num_envs", type=int, default=8)
-    parser.add_argument("--num_steps", type=int, default=32)
+    parser.add_argument("--num_envs", type=int, default=1)
+    parser.add_argument("--num_steps", type=int, default=256)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
@@ -38,22 +38,19 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
-                env=env,
-                video_folder=f"{run_dir}/videos",
-                episode_trigger=lambda x: x,
-                disable_logger=True,
+                env=env, video_folder=f"{run_dir}/videos", episode_trigger=lambda x: x, disable_logger=True
             )
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda state: np.clip(state, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
@@ -75,36 +72,29 @@ def compute_td_target(rewards, flags, gamma):
     return jnp.array(td_target)
 
 
-@functools.partial(jax.jit, static_argnums=(0,))
+@functools.partial(jax.jit, static_argnums=0)
 def policy_output(apply_fn, params, state):
     return apply_fn(params, state)
 
 
-def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
-    states, actions, td_target = batch
-
-    log_probs, td_predict = policy_output(apply_fn, params, states)
-    log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
-
-    advantages = td_target - td_predict
-
-    actor_loss = (-log_probs_by_actions * advantages).mean()
-    critic_loss = jnp.square(advantages).mean()
-    entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(-1).mean()
-
-    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
-
-
 @functools.partial(jax.jit, static_argnums=(2, 3))
 def train_step(train_state, batch, value_coef, entropy_coef):
+    def loss_fn(params):
+        states, actions, td_target = batch
+        log_probs, td_predict = policy_output(train_state.apply_fn, params, states)
+
+        log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
+
+        advantages = td_target - td_predict
+
+        actor_loss = (-log_probs_by_actions * advantages).mean()
+        critic_loss = jnp.square(advantages).mean()
+        entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
+
+        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
     grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(
-        train_state.params,
-        train_state.apply_fn,
-        batch,
-        value_coef,
-        entropy_coef,
-    )
+    loss, grads = grad_fn(train_state.params)
     train_state = train_state.apply_gradients(grads=grads)
 
     return train_state, loss
@@ -133,7 +123,7 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    num_actions: int
+    action_dim: int
     list_layer: list
 
     @nn.compact
@@ -142,10 +132,10 @@ class ActorCriticNet(nn.Module):
             x = nn.Dense(features=layer)(x)
             x = nn.tanh(x)
 
-        logits = nn.Dense(features=self.num_actions, name="actor")(x)
+        logits = nn.Dense(features=self.action_dim)(x)
         log_prob = nn.log_softmax(logits)
 
-        value = nn.Dense(features=1, name="critic")(x)
+        value = nn.Dense(features=1)(x)
 
         return log_prob, value.squeeze()
 
@@ -159,17 +149,16 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
 
     # Metadata about the environment
     observation_shape = envs.single_observation_space.shape
-    action_shape = envs.single_action_space.n
+    action_dim = envs.single_action_space.n
 
     # Set seed for reproducibility
     if args.seed:
@@ -182,14 +171,14 @@ def train(args, run_name, run_dir):
     key = jax.random.PRNGKey(args.seed)
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(num_actions=action_shape, list_layer=args.list_layer)
-    initial_params = policy.init(key, state)
+    policy_net = ActorCriticNet(action_dim=action_dim, list_layer=args.list_layer)
+    initial_params = policy_net.init(key, state)
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
     )
 
-    train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
+    train_state = TrainState.create(params=initial_params, apply_fn=policy_net.apply, tx=optimizer)
 
     del initial_params
 
@@ -210,7 +199,7 @@ def train(args, run_name, run_dir):
             # Get action
             log_prob, _ = policy_output(train_state.apply_fn, train_state.params, state)
             probs = np.exp(log_prob)
-            action = np.array([numpy_rng.choice(action_shape, p=probs[i]) for i in range(args.num_envs)])
+            action = np.array([numpy_rng.choice(action_dim, p=probs[i]) for i in range(args.num_envs)])
 
             # Perform action
             next_state, reward, terminated, truncated, infos = envs.step(action)
@@ -305,19 +294,19 @@ def eval_and_render(args, run_dir):
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    args_ = parse_args()
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "A2C_Flax"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
-    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")
-    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
 
-    if args.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
-        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+    if args_.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
+        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
         print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")

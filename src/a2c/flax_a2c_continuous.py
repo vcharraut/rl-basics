@@ -38,15 +38,12 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
-                env=env,
-                video_folder=f"{run_dir}/videos",
-                episode_trigger=lambda x: x,
-                disable_logger=True,
+                env=env, video_folder=f"{run_dir}/videos", episode_trigger=lambda x: x, disable_logger=True
             )
         else:
             env = gym.make(env_id)
@@ -54,7 +51,7 @@ def make_env(env_id, capture_video=False, run_dir=""):
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        env = gym.wrappers.TransformObservation(env, lambda state: np.clip(state, -10, 10))
         env = gym.wrappers.NormalizeReward(env)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
@@ -82,44 +79,36 @@ def compute_td_target(rewards, flags, gamma):
     td_target = []
     gain = 0.0
     for i in reversed(range(len(rewards))):
-        terminal = 1.0 - flags[i]
-        gain = rewards[i] + gain * gamma * terminal
+        gain = rewards[i] + gamma * flags[i] * gain
         td_target.append(gain)
 
     td_target = td_target[::-1]
     return jnp.array(td_target)
 
 
-@functools.partial(jax.jit, static_argnums=(0,))
+@functools.partial(jax.jit, static_argnums=0)
 def policy_output(apply_fn, params, state):
     return apply_fn(params, state)
 
 
-def loss_fn(params, apply_fn, batch, value_coef, entropy_coef):
-    states, actions, td_target = batch
-
-    action_mean, action_std, td_predict = policy_output(apply_fn, params, states)
-    log_probs_by_actions = get_log_prob(action_mean, action_std, actions).sum(-1)
-
-    advantages = td_target - td_predict
-
-    actor_loss = (-log_probs_by_actions * advantages).mean()
-    critic_loss = jnp.square(advantages).mean()
-    entropy_loss = (0.5 + 0.5 * jnp.log(2 * jnp.pi) + jnp.log(action_std)).sum(-1).mean()
-
-    return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
-
-
 @functools.partial(jax.jit, static_argnums=(2, 3))
 def train_step(train_state, batch, value_coef, entropy_coef):
+    def loss_fn(params):
+        states, actions, td_target = batch
+        log_probs, td_predict = policy_output(train_state.apply_fn, params, states)
+
+        log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
+
+        advantages = td_target - td_predict
+
+        actor_loss = (-log_probs_by_actions * advantages).mean()
+        critic_loss = jnp.square(advantages).mean()
+        entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
+
+        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
     grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(
-        train_state.params,
-        train_state.apply_fn,
-        batch,
-        value_coef,
-        entropy_coef,
-    )
+    loss, grads = grad_fn(train_state.params)
     train_state = train_state.apply_gradients(grads=grads)
 
     return train_state, loss
@@ -148,7 +137,7 @@ class RolloutBuffer:
 
 
 class ActorCriticNet(nn.Module):
-    num_actions: int
+    action_dim: int
     list_layer: list
 
     @nn.compact
@@ -157,8 +146,8 @@ class ActorCriticNet(nn.Module):
             x = nn.Dense(features=layer)(x)
             x = nn.tanh(x)
 
-        action_mean = nn.Dense(features=self.num_actions)(x)
-        action_std = nn.Dense(features=self.num_actions)(x)
+        action_mean = nn.Dense(features=self.action_dim)(x)
+        action_std = nn.Dense(features=self.action_dim)(x)
         action_std = nn.sigmoid(action_std) + 1e-7
 
         value = nn.Dense(features=1)(x)
@@ -175,10 +164,9 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
@@ -186,6 +174,7 @@ def train(args, run_name, run_dir):
     # Metadata about the environment
     observation_shape = envs.single_observation_space.shape
     action_shape = envs.single_action_space.shape
+    action_dim = np.prod(action_shape)
 
     # Initialize environment(s)
     state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
@@ -193,14 +182,14 @@ def train(args, run_name, run_dir):
     key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
 
     # Create policy network and optimizer
-    policy = ActorCriticNet(num_actions=np.prod(action_shape), list_layer=args.list_layer)
-    initial_params = policy.init(subkey, state)
+    policy_net = ActorCriticNet(action_dim=action_dim, list_layer=args.list_layer)
+    initial_params = policy_net.init(subkey, state)
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
     )
 
-    train_state = TrainState.create(params=initial_params, apply_fn=policy.apply, tx=optimizer)
+    train_state = TrainState.create(params=initial_params, apply_fn=policy_net.apply, tx=optimizer)
 
     del initial_params
 
@@ -317,19 +306,19 @@ def eval_and_render(args, run_dir):
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    args_ = parse_args()
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "A2C_Flax"
-    run_dir = f"runs/{args.env_id}__{run_name}__{run_time}"
+    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
-    print(f"Commencing training of {run_name} on {args.env_id} for {args.total_timesteps} timesteps.")
+    print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")
-    mean_train_return = train(args=args, run_name=run_name, run_dir=run_dir)
+    mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
 
-    if args.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args.env_id}.")
-        mean_eval_return = eval_and_render(args=args, run_dir=run_dir)
+    if args_.capture_video:
+        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
+        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
         print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
