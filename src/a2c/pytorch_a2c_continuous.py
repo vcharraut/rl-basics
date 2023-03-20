@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
-    parser.add_argument("--clip_grad_norm", type=float, default=0.8)
+    parser.add_argument("--clip_grad_norm", type=float, default=0.5)
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
@@ -145,8 +145,14 @@ def train(args, run_name, run_dir):
     if args.wandb:
         import wandb
 
-        wandb.init(project=args.env_id, name=run_name, sync_tensorboard=True, config=vars(args))
-
+        wandb.init(
+            project=args.env_id,
+            name=run_name,
+            sync_tensorboard=True,
+            config=vars(args),
+            monitor_gym=True,
+            save_code=True,
+        )
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
     hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])

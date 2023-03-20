@@ -144,8 +144,14 @@ def train(args, run_name, run_dir):
     if args.wandb:
         import wandb
 
-        wandb.init(project=args.env_id, name=run_name, sync_tensorboard=True, config=vars(args))
-
+        wandb.init(
+            project=args.env_id,
+            name=run_name,
+            sync_tensorboard=True,
+            config=vars(args),
+            monitor_gym=True,
+            save_code=True,
+        )
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
     hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
