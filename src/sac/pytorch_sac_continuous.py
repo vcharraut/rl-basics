@@ -38,7 +38,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, capture_video=False, run_dir=""):
+def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -60,10 +60,10 @@ def make_env(env_id, capture_video=False, run_dir=""):
 
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, action_shape, numpy_rng, device):
-        self.state_buffer = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
-        self.action_buffer = np.zeros((buffer_size, *action_shape), dtype=np.float32)
-        self.reward_buffer = np.zeros((buffer_size,), dtype=np.float32)
-        self.flag_buffer = np.zeros((buffer_size,), dtype=np.float32)
+        self.states = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros((buffer_size, *action_shape), dtype=np.float32)
+        self.rewards = np.zeros((buffer_size,), dtype=np.float32)
+        self.flags = np.zeros((buffer_size,), dtype=np.float32)
 
         self.batch_size = batch_size
         self.max_size = buffer_size
@@ -74,10 +74,10 @@ class ReplayBuffer:
         self.device = device
 
     def push(self, state, action, reward, flag):
-        self.state_buffer[self.idx] = state
-        self.action_buffer[self.idx] = action
-        self.reward_buffer[self.idx] = reward
-        self.flag_buffer[self.idx] = flag
+        self.states[self.idx] = state
+        self.actions[self.idx] = action
+        self.rewards[self.idx] = reward
+        self.flags[self.idx] = flag
 
         self.idx = (self.idx + 1) % self.max_size
         self.size = min(self.size + 1, self.max_size)
@@ -86,28 +86,28 @@ class ReplayBuffer:
         idxs = self.numpy_rng.integers(0, self.size - 1, size=self.batch_size)
 
         return (
-            torch.from_numpy(self.state_buffer[idxs]).to(self.device),
-            torch.from_numpy(self.action_buffer[idxs]).to(self.device),
-            torch.from_numpy(self.reward_buffer[idxs]).to(self.device),
-            torch.from_numpy(self.state_buffer[idxs + 1]).to(self.device),
-            torch.from_numpy(self.flag_buffer[idxs]).to(self.device),
+            torch.from_numpy(self.states[idxs]).to(self.device),
+            torch.from_numpy(self.actions[idxs]).to(self.device),
+            torch.from_numpy(self.rewards[idxs]).to(self.device),
+            torch.from_numpy(self.states[idxs + 1]).to(self.device),
+            torch.from_numpy(self.flags[idxs]).to(self.device),
         )
 
 
 class ActorCriticNet(nn.Module):
-    def __init__(self, observation_shape, action_shape, actor_layers, critic_layers, action_low, action_high, device):
+    def __init__(self, observation_shape, action_dim, actor_layers, critic_layers, action_low, action_high, device):
         super().__init__()
 
-        action_shape = np.prod(action_shape)
+        observation_dim = np.prod(observation_shape)
 
         self.actor_net = self._build_net(observation_shape, actor_layers)
-        self.actor_mean = self._build_linear(actor_layers[-1], action_shape)
-        self.actor_logstd = self._build_linear(actor_layers[-1], action_shape)
+        self.actor_mean = self._build_linear(actor_layers[-1], action_dim)
+        self.actor_logstd = self._build_linear(actor_layers[-1], action_dim)
 
-        self.critic_net1 = self._build_net(np.prod(observation_shape) + np.prod(action_shape), critic_layers)
+        self.critic_net1 = self._build_net(observation_dim + action_dim, critic_layers)
         self.critic_net1.append(self._build_linear(critic_layers[-1], 1))
 
-        self.critic_net2 = self._build_net(np.prod(observation_shape) + np.prod(action_shape), critic_layers)
+        self.critic_net2 = self._build_net(observation_dim + action_dim, critic_layers)
         self.critic_net2.append(self._build_linear(critic_layers[-1], 1))
 
         # Scale and bias the output of the network to match the action space
@@ -184,10 +184,9 @@ def train(args, run_name, run_dir):
 
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
+    table = f"|param|value|\n|-|-|\n{hyperparameters}"
+    writer.add_text("hyperparameters", table)
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
@@ -195,6 +194,7 @@ def train(args, run_name, run_dir):
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
     action_shape = env.single_action_space.shape
+    action_dim = np.prod(action_shape)
     action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
     action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
 
@@ -209,41 +209,23 @@ def train(args, run_name, run_dir):
 
     # Create the networks and the optimizer
     policy = ActorCriticNet(
-        observation_shape,
-        action_shape,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
+        observation_shape, action_dim, args.actor_layers, args.critic_layers, action_low, action_high, args.device
     )
     target = ActorCriticNet(
-        observation_shape,
-        action_shape,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
+        observation_shape, action_dim, args.actor_layers, args.critic_layers, action_low, action_high, args.device
     )
     target.load_state_dict(policy.state_dict())
 
     optimizer_actor = optim.Adam(policy.actor_net.parameters(), lr=args.learning_rate)
     optimizer_critic = optim.Adam(
-        list(policy.critic_net1.parameters()) + list(policy.critic_net2.parameters()),
-        lr=args.learning_rate,
+        list(policy.critic_net1.parameters()) + list(policy.critic_net2.parameters()), lr=args.learning_rate
     )
 
     alpha = args.alpha
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(
-        args.buffer_size,
-        args.batch_size,
-        observation_shape,
-        action_shape,
-        numpy_rng,
-        args.device,
+        args.buffer_size, args.batch_size, observation_shape, action_shape, numpy_rng, args.device
     )
 
     log_episodic_returns = []
@@ -358,13 +340,7 @@ def eval_and_render(args, run_dir):
 
     # Load policy
     policy = ActorCriticNet(
-        observation_shape,
-        action_shape,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
+        observation_shape, action_shape, args.actor_layers, args.critic_layers, action_low, action_high, args.device
     )
     policy.load_state_dict(torch.load(f"{run_dir}/actor.pt"))
     policy.eval()
