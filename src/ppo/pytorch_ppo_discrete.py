@@ -191,11 +191,13 @@ def train(args, run_name, run_dir):
             monitor_gym=True,
             save_code=True,
         )
+
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
-    table = f"|param|value|\n|-|-|\n{hyperparameters}"
-    writer.add_text("hyperparameters", table)
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
 
     # Create vectorized environment(s)
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
@@ -221,9 +223,11 @@ def train(args, run_name, run_dir):
     # Create buffers
     rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape, args.device)
 
-    log_episodic_returns, log_episodic_lengths = [], []
+    # Remove unnecessary variables
+    del action_dim
 
     global_step = 0
+    log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
 
     # Main loop

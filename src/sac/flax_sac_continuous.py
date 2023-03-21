@@ -231,11 +231,13 @@ def train(args, run_name, run_dir):
             monitor_gym=True,
             save_code=True,
         )
+
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
-    table = f"|param|value|\n|-|-|\n{hyperparameters}"
-    writer.add_text("hyperparameters", table)
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
@@ -262,34 +264,44 @@ def train(args, run_name, run_dir):
     action_bias = np.array((env.action_space.high + env.action_space.low) / 2.0)
 
     actor_net = ActorNet(action_dim=action_dim, action_scale=action_scale, action_bias=action_bias)
-    actor_initial_params = actor_net.init(actor_key, state, key)
+    actor_init_params = actor_net.init(actor_key, state, key)
 
     critic_net = CriticNet()
-    critic_initial_params = critic_net.init(critic_key, state, env.action_space.sample())
+    critic_init_params = critic_net.init(critic_key, state, env.action_space.sample())
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     actor_train_state = TrainState.create(
-        apply_fn=actor_net.apply, params=actor_initial_params, target_params=actor_initial_params, tx=optimizer
+        apply_fn=actor_net.apply, params=actor_init_params, target_params=actor_init_params, tx=optimizer
     )
 
     critic_train_state_1 = TrainState.create(
-        apply_fn=critic_net.apply, params=critic_initial_params, target_params=critic_initial_params, tx=optimizer
+        apply_fn=critic_net.apply, params=critic_init_params, target_params=critic_init_params, tx=optimizer
     )
 
     critic_train_state_2 = TrainState.create(
-        apply_fn=critic_net.apply, params=critic_initial_params, target_params=critic_initial_params, tx=optimizer
+        apply_fn=critic_net.apply, params=critic_init_params, target_params=critic_init_params, tx=optimizer
     )
-
-    del actor_initial_params, critic_initial_params
 
     alpha = args.alpha
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, action_shape, numpy_rng)
 
-    log_episodic_returns, log_episodic_lengths = [], []
+    # Remove unnecessary variables
+    del (
+        observation_shape,
+        action_shape,
+        actor_key,
+        critic_key,
+        actor_net,
+        critic_net,
+        critic_init_params,
+        actor_init_params,
+        optimizer,
+    )
 
+    log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
 
     # Main loop
@@ -363,10 +375,6 @@ def train(args, run_name, run_dir):
 
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Save final policy
-    # torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
-    # print(f"Saved policy to {run_dir}/policy.pt")
-
     # Close the environment
     env.close()
     writer.close()
@@ -377,18 +385,6 @@ def train(args, run_name, run_dir):
     writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
     return mean_train_return
-
-
-def eval_and_render(args, run_dir):
-    # Create environment
-    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
-
-    # Metadata about the environment
-
-    list_rewards = []
-    env.close()
-
-    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
@@ -403,8 +399,3 @@ if __name__ == "__main__":
     print(f"Results will be saved to: {run_dir}")
     mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
-
-    if args_.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
-        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
-        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")

@@ -163,11 +163,13 @@ def train(args, run_name, run_dir):
             monitor_gym=True,
             save_code=True,
         )
+
     # Create tensorboard writer and save hyperparameters
     writer = SummaryWriter(run_dir)
-    hyperparameters = "\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])
-    table = f"|param|value|\n|-|-|\n{hyperparameters}"
-    writer.add_text("hyperparameters", table)
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
 
     # Create vectorized environment
     env = gym.vector.SyncVectorEnv([make_env(args.env_id)])
@@ -188,21 +190,21 @@ def train(args, run_name, run_dir):
 
     # Create the networks and the optimizer
     policy_net = QNetwork(action_dim=action_dim)
-    initial_params = policy_net.init(key, state)
+    init_params = policy_net.init(key, state)
 
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     train_state = TrainState.create(
-        apply_fn=policy_net.apply, params=initial_params, target_params=initial_params, tx=optimizer
+        apply_fn=policy_net.apply, params=init_params, target_params=init_params, tx=optimizer
     )
-
-    del initial_params
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng)
 
-    log_episodic_returns, log_episodic_lengths = [], []
+    # Remove unnecessary variables
+    del policy_net, init_params, optimizer, observation_shape, key
 
+    log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
 
     # Main loop
@@ -256,9 +258,6 @@ def train(args, run_name, run_dir):
 
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
-    # Save the final policy
-    # flax.training.checkpoints.save_checkpoint(ckpt_dir=run_dir, target=train_state, step=0)
-
     # Close the environment
     env.close()
     writer.close()
@@ -269,46 +268,6 @@ def train(args, run_name, run_dir):
     writer.add_scalar("rollout/mean_train_return", mean_train_return, global_step)
 
     return mean_train_return
-
-
-def eval_and_render(args, run_dir):
-    # Create environment
-    env = gym.vector.SyncVectorEnv([make_env(args.env_id, capture_video=True, run_dir=run_dir)])
-    # state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
-
-    # Metadata about the environment
-    # action_dim = env.single_action_space.n
-
-    # Load policy
-    # policy = QNetwork(action_dim=action_dim)
-    # params = policy.init(jax.random.PRNGKey(args.seed), state)
-
-    # train_state = TrainState.create(apply_fn=policy.apply, params=params)
-    # train_state = flax.training.checkpoints.restore_checkpoint(ckpt_dir=run_dir, target=train_state)
-
-    # count_episodes = 0
-    list_rewards = []
-
-    # Run episodes
-    # while count_episodes < 30:
-    #     if np.random.rand() < 0.05:
-    #         action = np.random.randint(0, action_dim, size=1)
-    #     else:
-    #         q_values = policy.apply(train_state.params, state)
-    #         action = np.asarray(q_values.argmax(axis=1))
-
-    #     state, _, _, _, infos = env.step(action)
-
-    #     if "final_info" in infos:
-    #         info = infos["final_info"][0]
-    #         returns = info["episode"]["r"][0]
-    #         count_episodes += 1
-    #         list_rewards.append(returns)
-    #         print(f"-> Episode {count_episodes}: {returns} returns")
-
-    env.close()
-
-    return np.mean(list_rewards)
 
 
 if __name__ == "__main__":
@@ -323,8 +282,3 @@ if __name__ == "__main__":
     print(f"Results will be saved to: {run_dir}")
     mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
     print(f"Training - Mean returns achieved: {mean_train_return}.")
-
-    if args_.capture_video:
-        print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
-        mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
-        print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")
