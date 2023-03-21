@@ -201,7 +201,7 @@ def train(args, run_name, run_dir):
     # Create the replay buffer
     replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng)
 
-    log_episodic_returns = []
+    log_episodic_returns, log_episodic_lengths = [], []
 
     start_time = time.process_time()
 
@@ -234,8 +234,9 @@ def train(args, run_name, run_dir):
             info = infos["final_info"][0]
 
             log_episodic_returns.append(info["episode"]["r"])
-            writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
-            writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
+            log_episodic_lengths.append(info["episode"]["l"])
+            writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
+            writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
 
         # Perform training step
         if global_step > args.learning_start:

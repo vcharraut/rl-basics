@@ -220,7 +220,7 @@ def train(args, run_name, run_dir):
     # Create buffers
     rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape)
 
-    log_episodic_returns = []
+    log_episodic_returns, log_episodic_lengths = [], []
 
     global_step = 0
     start_time = time.process_time()
@@ -254,8 +254,9 @@ def train(args, run_name, run_dir):
                     continue
 
                 log_episodic_returns.append(info["episode"]["r"])
-                writer.add_scalar("rollout/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("rollout/episodic_length", info["episode"]["l"], global_step)
+                log_episodic_lengths.append(info["episode"]["l"])
+                writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
 
                 break
 
