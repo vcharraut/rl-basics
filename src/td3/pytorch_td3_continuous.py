@@ -255,8 +255,6 @@ def train(args, run_name, run_dir):
 
             log_episodic_returns.append(info["episode"]["r"])
             log_episodic_lengths.append(info["episode"]["l"])
-            writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
-            writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
 
         # Perform training step
         if global_step > args.learning_start:
@@ -300,7 +298,11 @@ def train(args, run_name, run_dir):
                 for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
-                # Log training metrics
+            # Log training metrics
+            if not global_step % args.log_interval:
+                writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+                writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
                 writer.add_scalar("train/actor_loss", actor_loss, global_step)
                 writer.add_scalar("train/critic_loss", critic_loss, global_step)
                 writer.add_scalar("train/qf1_a_values", qf1_a_values.mean(), global_step)
@@ -311,8 +313,6 @@ def train(args, run_name, run_dir):
                 writer.add_scalar("train/qf2_loss", qf2_loss, global_step)
                 writer.add_scalar("train/min_qf_next_target", min_qf_next_target.mean(), global_step)
                 writer.add_scalar("train/next_q_value", next_q_value.mean(), global_step)
-
-        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")

@@ -36,6 +36,8 @@ def parse_args():
 
     args = parser.parse_args()
 
+    args.log_interval = int(args.total_timesteps // 5000)
+
     return args
 
 
@@ -240,8 +242,6 @@ def train(args, run_name, run_dir):
 
             log_episodic_returns.append(info["episode"]["r"])
             log_episodic_lengths.append(info["episode"]["l"])
-            writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
-            writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
 
         # Perform training step
         if global_step > args.learning_start:
@@ -259,7 +259,12 @@ def train(args, run_name, run_dir):
             if not global_step % args.target_update_frequency:
                 train_state = train_state.replace(target_params=train_state.params)
 
-        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+            # Log training metrics
+            if not global_step % args.log_interval:
+                writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+                writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
+                writer.add_scalar("train/loss", loss, global_step)
 
     # Close the environment
     env.close()

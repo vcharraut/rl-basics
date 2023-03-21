@@ -6,7 +6,6 @@ import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn, optim
-from torch.distributions import Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
@@ -14,18 +13,19 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_id", type=str, default="HalfCheetah-v4")
-    parser.add_argument("--total_timesteps", type=int, default=1_000_000)
+    parser.add_argument("--env_id", type=str, default="LunarLander-v2")
+    parser.add_argument("--total_timesteps", type=int, default=500_000)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--buffer_size", type=int, default=100_000)
+    parser.add_argument("--buffer_size", type=int, default=25_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
-    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--exploration_noise", type=float, default=0.1)
-    parser.add_argument("--learning_start", type=int, default=25_000)
-    parser.add_argument("--policy_frequency", type=int, default=4)
+    parser.add_argument("--eps_end", type=float, default=0.05)
+    parser.add_argument("--eps_start", type=int, default=1)
+    parser.add_argument("--eps_decay", type=int, default=50_000)
+    parser.add_argument("--learning_start", type=int, default=10_000)
+    parser.add_argument("--train_frequency", type=int, default=10)
+    parser.add_argument("--target_update_frequency", type=int, default=1_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -34,7 +34,6 @@ def parse_args():
     args = parser.parse_args()
 
     args.device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
-    args.log_interval = int(args.total_timesteps // 5000)
 
     return args
 
@@ -53,16 +52,24 @@ def make_env(env_id, capture_video=False, run_dir="."):
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.FlattenObservation(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda state: np.clip(state, -10, 10))
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
         return env
 
     return thunk
 
 
+def get_exploration_prob(eps_start, eps_end, eps_decay, step):
+    return eps_end + (eps_start - eps_end) * np.exp(-1.0 * step / eps_decay)
+
+
 class ReplayBuffer:
-    def __init__(self, buffer_size, batch_size, observation_shape, action_shape, numpy_rng, device):
+    def __init__(self, buffer_size, batch_size, observation_shape, numpy_rng, device):
         self.states = np.zeros((buffer_size, *observation_shape), dtype=np.float32)
-        self.actions = np.zeros((buffer_size, *action_shape), dtype=np.float32)
+        self.actions = np.zeros((buffer_size,), dtype=np.int64)
         self.rewards = np.zeros((buffer_size,), dtype=np.float32)
         self.flags = np.zeros((buffer_size,), dtype=np.float32)
 
@@ -88,26 +95,19 @@ class ReplayBuffer:
 
         return (
             torch.from_numpy(self.states[idxs]).to(self.device),
-            torch.from_numpy(self.actions[idxs]).to(self.device),
+            torch.from_numpy(self.actions[idxs]).unsqueeze(-1).to(self.device),
             torch.from_numpy(self.rewards[idxs]).to(self.device),
             torch.from_numpy(self.states[idxs + 1]).to(self.device),
             torch.from_numpy(self.flags[idxs]).to(self.device),
         )
 
 
-class ActorCriticNet(nn.Module):
-    def __init__(self, observation_shape, action_dim, actor_layers, critic_layers, action_low, action_high, device):
+class QNetwork(nn.Module):
+    def __init__(self, observation_shape, action_dim, list_layer, device):
         super().__init__()
 
-        self.actor_net = self._build_net(observation_shape, actor_layers)
-        self.actor_net.append(self._build_linear(actor_layers[-1], action_dim))
-
-        self.critic_net = self._build_net(np.prod(observation_shape) + np.prod(action_dim), critic_layers)
-        self.critic_net.append(self._build_linear(critic_layers[-1], 1))
-
-        # Scale and bias the output of the network to match the action space
-        self.register_buffer("action_scale", ((action_high - action_low) / 2.0))
-        self.register_buffer("action_bias", ((action_high + action_low) / 2.0))
+        self.network = self._build_net(observation_shape, list_layer)
+        self.network.append(self._build_linear(list_layer[-1], action_dim))
 
         if device.type == "cuda":
             self.cuda()
@@ -132,12 +132,8 @@ class ActorCriticNet(nn.Module):
 
         return layers
 
-    def actor(self, state):
-        output = torch.tanh(self.actor_net(state))
-        return output * self.action_scale + self.action_bias
-
-    def critic(self, state, action):
-        return self.critic_net(torch.cat([state, action], 1)).squeeze()
+    def forward(self, state):
+        return self.network(state)
 
 
 def train(args, run_name, run_dir):
@@ -166,10 +162,7 @@ def train(args, run_name, run_dir):
 
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
-    action_shape = env.single_action_space.shape
-    action_dim = np.prod(action_shape)
-    action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
-    action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
+    action_dim = env.single_action_space.n
 
     # Set seed for reproducibility
     if args.seed:
@@ -181,54 +174,36 @@ def train(args, run_name, run_dir):
         state, _ = env.reset()
 
     # Create the networks and the optimizer
-    policy = ActorCriticNet(
-        observation_shape,
-        action_dim,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
-    )
-    target = ActorCriticNet(
-        observation_shape,
-        action_dim,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
-    )
-    target.load_state_dict(policy.state_dict())
+    policy = QNetwork(observation_shape, action_dim, args.list_layer, args.device)
+    target_policy = QNetwork(observation_shape, action_dim, args.list_layer, args.device)
+    target_policy.load_state_dict(policy.state_dict())
 
-    optimizer_actor = optim.Adam(policy.actor_net.parameters(), lr=args.learning_rate)
-    optimizer_critic = optim.Adam(policy.critic_net.parameters(), lr=args.learning_rate)
+    optimizer = optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     # Create the replay buffer
-    replay_buffer = ReplayBuffer(
-        args.buffer_size,
-        args.batch_size,
-        observation_shape,
-        action_shape,
-        numpy_rng,
-        args.device,
-    )
+    replay_buffer = ReplayBuffer(args.buffer_size, args.batch_size, observation_shape, numpy_rng, args.device)
 
     # Remove unnecessary variables
-    del observation_shape, action_shape, action_dim
+    del observation_shape
 
     log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
 
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
-        if global_step < args.learning_start:
-            action = Uniform(action_low, action_high).sample().unsqueeze(0)
-        else:
-            with torch.no_grad():
-                state_tensor = torch.from_numpy(state).to(args.device).float()
-                action = policy.actor(state_tensor)
-                action += torch.normal(0, policy.action_scale * args.exploration_noise)
+        with torch.no_grad():
+            # Exploration or intensification
+            exploration_prob = get_exploration_prob(args.eps_start, args.eps_end, args.eps_decay, global_step)
+
+            # Log exploration probability
+            writer.add_scalar("rollout/eps_threshold", exploration_prob, global_step)
+
+            if numpy_rng.random() < exploration_prob:
+                # Exploration
+                action = torch.randint(action_dim, (1,)).to(args.device)
+            else:
+                # Intensification
+                action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
 
         # Perform action
         action = action.cpu().numpy()
@@ -246,45 +221,42 @@ def train(args, run_name, run_dir):
 
             log_episodic_returns.append(info["episode"]["r"])
             log_episodic_lengths.append(info["episode"]["l"])
+            writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
+            writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
 
         # Perform training step
         if global_step > args.learning_start:
-            # Sample a batch from the replay buffer
-            states, actions, rewards, next_states, flags = replay_buffer.sample()
+            if not global_step % args.train_frequency:
+                # Sample a batch from the replay buffer
+                states, actions, rewards, next_states, flags = replay_buffer.sample()
 
-            # Update critic
-            with torch.no_grad():
-                next_state_actions = target.actor(next_states)
-                critic_next_target = target.critic(next_states, next_state_actions)
+                # Compute TD error
+                td_predict = policy(states).gather(1, actions).squeeze()
 
-            td_target = rewards + args.gamma * flags * critic_next_target
-            td_predict = policy.critic(states, actions)
-            critic_loss = mse_loss(td_predict, td_target)
+                # Compute TD target
+                with torch.no_grad():
+                    # Double Q-Learning
+                    action_by_qvalue = policy(next_states).argmax(1).unsqueeze(-1)
+                    max_q_target = target_policy(next_states).gather(1, action_by_qvalue).squeeze()
 
-            optimizer_critic.zero_grad()
-            critic_loss.backward()
-            optimizer_critic.step()
+                td_target = rewards + args.gamma * flags * max_q_target
 
-            # Update actor
-            if not global_step % args.policy_frequency:
-                actor_loss = -policy.critic(states, policy.actor(states)).mean()
-                optimizer_actor.zero_grad()
-                actor_loss.backward()
-                optimizer_actor.step()
+                # Compute loss
+                loss = mse_loss(td_predict, td_target)
 
-                # Update the target network (soft update)
-                for param, target_param in zip(policy.actor_net.parameters(), target.actor_net.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(policy.critic_net.parameters(), target.critic_net.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                # Update policy network
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            # Log training metrics
-            if not global_step % args.log_interval:
-                writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-                writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
-                writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
-                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
-                writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
+                # Log training metrics
+                writer.add_scalar("train/loss", loss, global_step)
+
+            # Update target network
+            if not global_step % args.target_update_frequency:
+                target_policy.load_state_dict(policy.state_dict())
+
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
@@ -308,35 +280,28 @@ def eval_and_render(args, run_dir):
 
     # Metadata about the environment
     observation_shape = env.single_observation_space.shape
-    action_shape = env.single_action_space.shape
-    action_dim = np.prod(action_shape)
-    action_low = torch.from_numpy(env.single_action_space.low).to(args.device)
-    action_high = torch.from_numpy(env.single_action_space.high).to(args.device)
+    action_dim = env.single_action_space.n
 
     # Load policy
-    policy = ActorCriticNet(
-        observation_shape,
-        action_dim,
-        args.actor_layers,
-        args.critic_layers,
-        action_low,
-        action_high,
-        args.device,
-    )
-    policy.load_state_dict(torch.load(f"{run_dir}/actor.pt"))
+    policy = QNetwork(observation_shape, action_dim, args.list_layer, args.device)
+    policy.load_state_dict(torch.load(f"{run_dir}/policy.pt"))
     policy.eval()
 
     count_episodes = 0
     list_rewards = []
 
+    numpy_rng = np.random.default_rng()
     state, _ = env.reset(seed=args.seed) if args.seed else env.reset()
 
     # Run episodes
     while count_episodes < 30:
         with torch.no_grad():
-            state_tensor = torch.from_numpy(state).to(args.device).float()
-            action = policy(state_tensor)
-            action += torch.normal(0, policy.action_scale * args.exploration_noise)
+            if numpy_rng.random() < 0.05:
+                # Exploration
+                action = torch.randint(action_dim, (1,)).to(args.device)
+            else:
+                # Intensification
+                action = policy(torch.from_numpy(state).to(args.device).float()).argmax(axis=1)
 
         action = action.cpu().numpy()
         state, _, _, _, infos = env.step(action)
@@ -358,7 +323,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "DDPG_PyTorch"
+    run_name = "C51_PyTorch"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
