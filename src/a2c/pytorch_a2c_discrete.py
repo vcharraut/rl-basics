@@ -43,7 +43,10 @@ def make_env(env_id, capture_video=False, run_dir="."):
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
-                env=env, video_folder=f"{run_dir}/videos", episode_trigger=lambda x: x, disable_logger=True
+                env=env,
+                video_folder=f"{run_dir}/videos",
+                episode_trigger=lambda x: x,
+                disable_logger=True,
             )
         else:
             env = gym.make(env_id)

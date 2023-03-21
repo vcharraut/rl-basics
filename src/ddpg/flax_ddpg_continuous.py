@@ -77,7 +77,10 @@ def critic_train_step(critic_train_state, actor_train_state, batch, gamma):
     # Compute the target q-value
     next_state_actions = actor_output(actor_train_state.apply_fn, actor_train_state.target_params, next_states)
     critic_next_target = critic_output(
-        critic_train_state.apply_fn, critic_train_state.target_params, next_states, next_state_actions
+        critic_train_state.apply_fn,
+        critic_train_state.target_params,
+        next_states,
+        next_state_actions,
     )
 
     td_target = rewards + gamma * flags * critic_next_target
@@ -231,11 +234,17 @@ def train(args, run_name, run_dir):
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     actor_train_state = TrainState.create(
-        apply_fn=actor_net.apply, params=actor_init_params, target_params=actor_init_params, tx=optimizer
+        apply_fn=actor_net.apply,
+        params=actor_init_params,
+        target_params=actor_init_params,
+        tx=optimizer,
     )
 
     critic_train_state = TrainState.create(
-        apply_fn=critic_net.apply, params=critic_init_params, target_params=critic_init_params, tx=optimizer
+        apply_fn=critic_net.apply,
+        params=critic_init_params,
+        target_params=critic_init_params,
+        tx=optimizer,
     )
 
     # Create the replay buffer
@@ -266,9 +275,10 @@ def train(args, run_name, run_dir):
             action = np.array(
                 [
                     (jax.device_get(action)[0] + numpy_rng.normal(0, action_scale * args.exploration_noise)[0]).clip(
-                        action_low, action_high
-                    )
-                ]
+                        action_low,
+                        action_high,
+                    ),
+                ],
             )
 
         # Perform action
@@ -298,8 +308,10 @@ def train(args, run_name, run_dir):
 
             critic_train_state = critic_train_state.replace(
                 target_params=optax.incremental_update(
-                    critic_train_state.params, critic_train_state.target_params, args.tau
-                )
+                    critic_train_state.params,
+                    critic_train_state.target_params,
+                    args.tau,
+                ),
             )
 
             # Update actor
@@ -309,8 +321,10 @@ def train(args, run_name, run_dir):
                 # Update the target network (soft update)
                 actor_train_state = actor_train_state.replace(
                     target_params=optax.incremental_update(
-                        actor_train_state.params, actor_train_state.target_params, args.tau
-                    )
+                        actor_train_state.params,
+                        actor_train_state.target_params,
+                        args.tau,
+                    ),
                 )
 
                 # Log training metrics

@@ -196,7 +196,10 @@ def train(args, run_name, run_dir):
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     train_state = TrainState.create(
-        apply_fn=policy_net.apply, params=init_params, target_params=init_params, tx=optimizer
+        apply_fn=policy_net.apply,
+        params=init_params,
+        target_params=init_params,
+        tx=optimizer,
     )
 
     # Create the replay buffer

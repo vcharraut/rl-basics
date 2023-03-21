@@ -76,13 +76,22 @@ def critic_train_step(critic_train_state_1, critic_train_state_2, actor_train_st
 
     # Compute the target q-value
     next_state_actions, next_state_log_pi, key = actor_output(
-        actor_train_state.apply_fn, actor_train_state.params, next_states, key
+        actor_train_state.apply_fn,
+        actor_train_state.params,
+        next_states,
+        key,
     )
     critic_next_target_1 = critic_output(
-        critic_train_state_1.apply_fn, critic_train_state_1.target_params, next_states, next_state_actions
+        critic_train_state_1.apply_fn,
+        critic_train_state_1.target_params,
+        next_states,
+        next_state_actions,
     )
     critic_next_target_2 = critic_output(
-        critic_train_state_2.apply_fn, critic_train_state_2.target_params, next_states, next_state_actions
+        critic_train_state_2.apply_fn,
+        critic_train_state_2.target_params,
+        next_states,
+        next_state_actions,
     )
     min_qf_next_target = jnp.minimum(critic_next_target_1, critic_next_target_2) - alpha * next_state_log_pi
 
@@ -272,15 +281,24 @@ def train(args, run_name, run_dir):
     optimizer = optax.adam(learning_rate=args.learning_rate)
 
     actor_train_state = TrainState.create(
-        apply_fn=actor_net.apply, params=actor_init_params, target_params=actor_init_params, tx=optimizer
+        apply_fn=actor_net.apply,
+        params=actor_init_params,
+        target_params=actor_init_params,
+        tx=optimizer,
     )
 
     critic_train_state_1 = TrainState.create(
-        apply_fn=critic_net.apply, params=critic_init_params, target_params=critic_init_params, tx=optimizer
+        apply_fn=critic_net.apply,
+        params=critic_init_params,
+        target_params=critic_init_params,
+        tx=optimizer,
     )
 
     critic_train_state_2 = TrainState.create(
-        apply_fn=critic_net.apply, params=critic_init_params, target_params=critic_init_params, tx=optimizer
+        apply_fn=critic_net.apply,
+        params=critic_init_params,
+        target_params=critic_init_params,
+        tx=optimizer,
     )
 
     alpha = args.alpha
@@ -348,13 +366,17 @@ def train(args, run_name, run_dir):
 
             critic_train_state_1 = critic_train_state_1.replace(
                 target_params=optax.incremental_update(
-                    critic_train_state_1.params, critic_train_state_1.target_params, args.tau
-                )
+                    critic_train_state_1.params,
+                    critic_train_state_1.target_params,
+                    args.tau,
+                ),
             )
             critic_train_state_2 = critic_train_state_2.replace(
                 target_params=optax.incremental_update(
-                    critic_train_state_2.params, critic_train_state_2.target_params, args.tau
-                )
+                    critic_train_state_2.params,
+                    critic_train_state_2.target_params,
+                    args.tau,
+                ),
             )
 
             # Update actor

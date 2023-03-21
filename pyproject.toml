@@ -2,7 +2,7 @@
 line-length = 120
 
 [tool.ruff]
-ignore = ["B008", "COM812"]
+ignore = ["B008"]
 line-length = 120
 select = [
   "F",  # Pyflakes

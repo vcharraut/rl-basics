@@ -43,7 +43,10 @@ def make_env(env_id, capture_video=False, run_dir="."):
         if capture_video:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(
-                env=env, video_folder=f"{run_dir}/videos", episode_trigger=lambda x: x, disable_logger=True
+                env=env,
+                video_folder=f"{run_dir}/videos",
+                episode_trigger=lambda x: x,
+                disable_logger=True,
             )
         else:
             env = gym.make(env_id)
@@ -183,7 +186,8 @@ def train(args, run_name, run_dir):
     init_params = policy_net.init(key, state)
 
     optimizer = optax.chain(
-        optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
+        optax.clip_by_global_norm(max_norm=args.clip_grad_norm),
+        optax.adam(learning_rate=args.learning_rate),
     )
 
     train_state = TrainState.create(params=init_params, apply_fn=policy_net.apply, tx=optimizer)

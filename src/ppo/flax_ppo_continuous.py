@@ -124,7 +124,8 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
         return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
 
     trajectories = jax.tree_util.tree_map(
-        lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]), trajectories
+        lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]),
+        trajectories,
     )
 
     for batch in zip(*trajectories):
@@ -224,7 +225,8 @@ def train(args, run_name, run_dir):
     init_params = policy_net.init(subkey, state)
 
     optimizer = optax.chain(
-        optax.clip_by_global_norm(max_norm=args.clip_grad_norm), optax.adam(learning_rate=args.learning_rate)
+        optax.clip_by_global_norm(max_norm=args.clip_grad_norm),
+        optax.adam(learning_rate=args.learning_rate),
     )
 
     train_state = TrainState.create(params=init_params, apply_fn=policy_net.apply, tx=optimizer)
@@ -283,7 +285,14 @@ def train(args, run_name, run_dir):
 
         # Calculate advantages and TD target
         advantages = compute_advantages(
-            rewards, values, flags, last_value, args.gamma, args.gae, args.num_steps, args.num_envs
+            rewards,
+            values,
+            flags,
+            last_value,
+            args.gamma,
+            args.gae,
+            args.num_steps,
+            args.num_envs,
         )
         td_target = advantages + values
 

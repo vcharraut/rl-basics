@@ -181,10 +181,22 @@ def train(args, run_name, run_dir):
 
     # Create the networks and the optimizer
     policy = ActorCriticNet(
-        observation_shape, action_dim, args.actor_layers, args.critic_layers, action_low, action_high, args.device
+        observation_shape,
+        action_dim,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
     )
     target = ActorCriticNet(
-        observation_shape, action_dim, args.actor_layers, args.critic_layers, action_low, action_high, args.device
+        observation_shape,
+        action_dim,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
     )
     target.load_state_dict(policy.state_dict())
 
@@ -193,7 +205,12 @@ def train(args, run_name, run_dir):
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(
-        args.buffer_size, args.batch_size, observation_shape, action_shape, numpy_rng, args.device
+        args.buffer_size,
+        args.batch_size,
+        observation_shape,
+        action_shape,
+        numpy_rng,
+        args.device,
     )
 
     # Remove unnecessary variables
@@ -297,7 +314,13 @@ def eval_and_render(args, run_dir):
 
     # Load policy
     policy = ActorCriticNet(
-        observation_shape, action_dim, args.actor_layers, args.critic_layers, action_low, action_high, args.device
+        observation_shape,
+        action_dim,
+        args.actor_layers,
+        args.critic_layers,
+        action_low,
+        action_high,
+        args.device,
     )
     policy.load_state_dict(torch.load(f"{run_dir}/actor.pt"))
     policy.eval()
