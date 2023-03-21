@@ -391,17 +391,13 @@ def train(args, run_name, run_dir):
                         key,
                     )
 
-                # Log training metrics
-                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
-                writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
-
             # Log training metrics
             if not global_step % args.log_interval:
                 writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
                 writer.add_scalar("rollout/episodic_return", np.mean(info["episode"]["r"][-10:]), global_step)
                 writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-10:]), global_step)
-                writer.add_scalar("train/actor_loss", actor_loss, global_step)
-                writer.add_scalar("train/critic_loss", critic_loss, global_step)
+                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
+                writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
 
     # Close the environment
     env.close()

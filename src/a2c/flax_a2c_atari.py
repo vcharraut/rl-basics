@@ -254,7 +254,7 @@ def train(args, run_name, run_dir):
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
             writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-10:]), global_step)
             writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-10:]), global_step)
-            writer.add_scalar("train/loss", loss, global_step)
+            writer.add_scalar("train/loss", np.array(loss), global_step)
 
     # Close the environment
     envs.close()
