@@ -34,7 +34,6 @@ def parse_args():
 
     args.batch_size = int(args.num_envs * args.num_steps)
     args.num_updates = int(args.total_timesteps // args.batch_size)
-    args.log_interval = int(args.batch_size * 2)
 
     return args
 
@@ -224,6 +223,8 @@ def train(args, run_name, run_dir):
 
                 log_episodic_returns.append(info["episode"]["r"])
                 log_episodic_lengths.append(info["episode"]["l"])
+                writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-5:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-5:]), global_step)
 
         # Get transition batch
         states, actions, rewards, flags = rollout_buffer.get()
@@ -260,12 +261,9 @@ def train(args, run_name, run_dir):
         optimizer.step()
 
         # Log training metrics
-        if not global_step % args.log_interval:
-            writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-10:]), global_step)
-            writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-10:]), global_step)
-            writer.add_scalar("train/actor_loss", actor_loss, global_step)
-            writer.add_scalar("train/critic_loss", critic_loss, global_step)
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+        writer.add_scalar("train/actor_loss", actor_loss, global_step)
+        writer.add_scalar("train/critic_loss", critic_loss, global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")

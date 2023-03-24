@@ -39,7 +39,6 @@ def parse_args():
     args.batch_size = int(args.num_envs * args.num_steps)
     args.num_minibatches = int(args.batch_size // args.minibatch_size)
     args.num_updates = int(args.total_timesteps // args.batch_size)
-    args.log_interval = int(args.batch_size * 2)
 
     return args
 
@@ -47,7 +46,13 @@ def parse_args():
 def make_env(env_id, capture_video=False, run_dir="."):
     def thunk():
         if capture_video:
-            env = gym.make(env_id, frameskip=1, render_mode="rgb_array")
+            env = gym.make(
+                env_id,
+                frameskip=1,
+                full_action_space=False,
+                repeat_action_probability=0.0,
+                render_mode="rgb_array",
+            )
             env = gym.wrappers.RecordVideo(
                 env=env,
                 video_folder=f"{run_dir}/videos",
@@ -55,7 +60,7 @@ def make_env(env_id, capture_video=False, run_dir="."):
                 disable_logger=True,
             )
         else:
-            env = gym.make(env_id, frameskip=1)
+            env = gym.make(env_id, frameskip=1, full_action_space=False, repeat_action_probability=0.0)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.AtariPreprocessing(env)
         env = gym.wrappers.FrameStack(env, 4)
@@ -192,7 +197,7 @@ def train(args, run_name, run_dir):
         import wandb
 
         wandb.init(
-            project=args.env_id,
+            project=args_.env_id.split("/")[1],
             name=run_name,
             sync_tensorboard=True,
             config=vars(args),
@@ -270,6 +275,8 @@ def train(args, run_name, run_dir):
 
                 log_episodic_returns.append(info["episode"]["r"])
                 log_episodic_lengths.append(info["episode"]["l"])
+                writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-5:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-5:]), global_step)
 
         # Get transition batch
         states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
@@ -344,16 +351,13 @@ def train(args, run_name, run_dir):
         )
 
         # Log training metrics
-        if not global_step % args.log_interval:
-            writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-10:]), global_step)
-            writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-10:]), global_step)
-            writer.add_scalar("train/actor_loss", actor_loss, global_step)
-            writer.add_scalar("train/critic_loss", critic_loss, global_step)
-            writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
-            writer.add_scalar("train/approx_kl", approx_kl, global_step)
-            writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
-            writer.add_scalar("train/explained_var", explained_var, global_step)
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+        writer.add_scalar("train/actor_loss", actor_loss, global_step)
+        writer.add_scalar("train/critic_loss", critic_loss, global_step)
+        writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)
+        writer.add_scalar("train/approx_kl", approx_kl, global_step)
+        writer.add_scalar("train/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("train/explained_var", explained_var, global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")

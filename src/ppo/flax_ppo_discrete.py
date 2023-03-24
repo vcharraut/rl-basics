@@ -39,7 +39,6 @@ def parse_args():
     args.batch_size = int(args.num_envs * args.num_steps)
     args.num_minibatches = int(args.batch_size // args.minibatch_size)
     args.num_updates = int(args.total_timesteps // args.batch_size)
-    args.log_interval = int(args.batch_size * 2)
 
     return args
 
@@ -260,6 +259,8 @@ def train(args, run_name, run_dir):
 
                 log_episodic_returns.append(info["episode"]["r"])
                 log_episodic_lengths.append(info["episode"]["l"])
+                writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-5:]), global_step)
+                writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-5:]), global_step)
 
         # Get transition batch
         states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
@@ -307,11 +308,8 @@ def train(args, run_name, run_dir):
             )
 
         # Log training metrics
-        if not global_step % args.log_interval:
-            writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("rollout/episodic_return", np.mean(log_episodic_returns[-10:]), global_step)
-            writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-10:]), global_step)
-            writer.add_scalar("train/loss", np.asarray(loss), global_step)
+        writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+        writer.add_scalar("train/loss", np.asarray(loss), global_step)
 
     # Close the environment
     envs.close()
