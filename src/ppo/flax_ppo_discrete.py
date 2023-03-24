@@ -23,7 +23,8 @@ def parse_args():
     parser.add_argument("--num_optims", type=int, default=4)
     parser.add_argument("--minibatch_size", type=int, default=64)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--list_layer", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[64, 64])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[64, 64])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae", type=float, default=0.95)
     parser.add_argument("--eps_clip", type=float, default=0.2)
@@ -154,18 +155,25 @@ class RolloutBuffer:
 
 class ActorCriticNet(nn.Module):
     action_dim: int
-    list_layer: list
+    actor_layers: list
+    critic_layers: list
 
     @nn.compact
-    def __call__(self, x):
-        for layer in self.list_layer:
-            x = nn.Dense(features=layer)(x)
-            x = nn.tanh(x)
+    def __call__(self, state):
+        actor_output = state
+        for layer in self.actor_layers:
+            actor_output = nn.Dense(features=layer)(actor_output)
+            actor_output = nn.tanh(actor_output)
 
-        logits = nn.Dense(features=self.action_dim)(x)
+        critic_output = state
+        for layer in self.critic_layers:
+            critic_output = nn.Dense(features=layer)(critic_output)
+            critic_output = nn.tanh(critic_output)
+
+        logits = nn.Dense(features=self.action_dim)(actor_output)
         log_prob = nn.log_softmax(logits)
 
-        value = nn.Dense(features=1)(x)
+        value = nn.Dense(features=1)(critic_output)
 
         return log_prob, value.squeeze()
 
@@ -209,7 +217,7 @@ def train(args, run_name, run_dir):
     key = jax.random.PRNGKey(args.seed)
 
     # Create policy network and optimizer
-    policy_net = ActorCriticNet(action_dim=action_dim, list_layer=args.list_layer)
+    policy_net = ActorCriticNet(action_dim=action_dim, actor_layers=args.actor_layers, critic_layers=args.critic_layers)
     init_params = policy_net.init(key, state)
 
     optimizer = optax.chain(
