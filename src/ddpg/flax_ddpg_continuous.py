@@ -304,7 +304,12 @@ def train(args, run_name, run_dir):
             # Sample replay buffer
             batch = replay_buffer.sample()
 
-            critic_train_state, actor_loss = critic_train_step(critic_train_state, actor_train_state, batch, args.gamma)
+            critic_train_state, critic_loss = critic_train_step(
+                critic_train_state,
+                actor_train_state,
+                batch,
+                args.gamma,
+            )
 
             critic_train_state = critic_train_state.replace(
                 target_params=optax.incremental_update(
@@ -316,9 +321,16 @@ def train(args, run_name, run_dir):
 
             # Update actor
             if not global_step % args.policy_frequency:
-                actor_train_state, critic_loss = actor_train_step(actor_train_state, critic_train_state, batch)
+                actor_train_state, actor_loss = actor_train_step(actor_train_state, critic_train_state, batch)
 
                 # Update the target network (soft update)
+                critic_train_state = critic_train_state.replace(
+                    target_params=optax.incremental_update(
+                        critic_train_state.params,
+                        critic_train_state.target_params,
+                        args.tau,
+                    ),
+                )
                 actor_train_state = actor_train_state.replace(
                     target_params=optax.incremental_update(
                         actor_train_state.params,
@@ -327,9 +339,10 @@ def train(args, run_name, run_dir):
                     ),
                 )
 
+                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
+
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
             writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
 
     # Close the environment

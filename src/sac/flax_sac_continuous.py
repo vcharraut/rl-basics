@@ -391,9 +391,10 @@ def train(args, run_name, run_dir):
                         key,
                     )
 
+                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
+
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
             writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
 
     # Close the environment

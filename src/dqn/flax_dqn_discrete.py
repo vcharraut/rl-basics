@@ -261,7 +261,6 @@ def train(args, run_name, run_dir):
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/loss", np.array(loss), global_step)
 
     # Close the environment
     env.close()

@@ -346,6 +346,7 @@ def train(args, run_name, run_dir):
 
         # Log training metrics
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
+        writer.add_scalar("train/loss", loss, global_step)
         writer.add_scalar("train/actor_loss", actor_loss, global_step)
         writer.add_scalar("train/critic_loss", critic_loss, global_step)
         writer.add_scalar("train/old_approx_kl", old_approx_kl, global_step)

@@ -321,6 +321,8 @@ def train(args, run_name, run_dir):
                     actor_loss.backward()
                     optimizer_actor.step()
 
+                writer.add_scalar("train/actor_loss", actor_loss, global_step)
+
                 # Update the target network (soft update)
                 for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
@@ -329,7 +331,6 @@ def train(args, run_name, run_dir):
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/actor_loss", actor_loss, global_step)
             writer.add_scalar("train/critic_loss", critic_loss, global_step)
             writer.add_scalar("train/qf1_a_values", qf1_a_values.mean(), global_step)
             writer.add_scalar("train/qf2_a_values", qf2_a_values.mean(), global_step)

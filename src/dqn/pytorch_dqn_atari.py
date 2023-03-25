@@ -262,13 +262,15 @@ def train(args, run_name, run_dir):
                 loss.backward()
                 optimizer.step()
 
+                # Log training metrics
+                writer.add_scalar("train/loss", loss, global_step)
+
             # Update target network
             if not global_step % args.target_update_frequency:
                 target_policy.load_state_dict(policy.state_dict())
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/loss", loss, global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")

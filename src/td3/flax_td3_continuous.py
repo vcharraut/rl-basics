@@ -345,7 +345,7 @@ def train(args, run_name, run_dir):
             # Sample replay buffer
             batch = replay_buffer.sample()
 
-            critic_train_state_1, critic_train_state_2, actor_loss, key = critic_train_step(
+            critic_train_state_1, critic_train_state_2, critic_loss, key = critic_train_step(
                 critic_train_state_1,
                 critic_train_state_2,
                 actor_train_state,
@@ -376,7 +376,7 @@ def train(args, run_name, run_dir):
 
             # Update actor
             if not global_step % args.policy_frequency:
-                actor_train_state, critic_loss = actor_train_step(actor_train_state, critic_train_state_1, batch)
+                actor_train_state, actor_loss = actor_train_step(actor_train_state, critic_train_state_1, batch)
 
                 # Update the target network (soft update)
                 actor_train_state = actor_train_state.replace(
@@ -387,9 +387,10 @@ def train(args, run_name, run_dir):
                     ),
                 )
 
+                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
+
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
             writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
 
     # Close the environment
