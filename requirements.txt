@@ -1,9 +1,10 @@
-gymnasium[all]
-gymnasium[accept-rom-license]
+gymnasium[all]<0.28.0
+gymnasium[accept-rom-license]<0.28.0
 numpy
 torch
 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 jax[cuda]
 flax
+tensorflow-probability
 tensorboard
 wandb

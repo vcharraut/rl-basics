@@ -248,7 +248,7 @@ def train(args, run_name, run_dir):
         td_target = compute_td_target(rewards, flags, args.gamma)
 
         # Normalize td_target
-        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-7)
+        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-8)
 
         # Create batch
         batch = (states.reshape(-1, *observation_shape), actions.reshape(-1), td_target.reshape(-1))

@@ -10,6 +10,7 @@ import optax
 from flax import linen as nn
 from flax.training.train_state import TrainState
 from jax import numpy as jnp
+from tensorflow_probability.substrates.jax.distributions import Normal
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
@@ -69,19 +70,6 @@ def make_env(env_id, capture_video=False, run_dir="."):
     return thunk
 
 
-@jax.jit
-def sample_action(mean, std, key):
-    key, subkey = jax.random.split(key)
-    return jax.random.normal(subkey, shape=mean.shape) * std + mean, key
-
-
-@jax.jit
-def get_log_prob(mean, std, value):
-    var = std**2
-    log_scale = jnp.log(std)
-    return -((value - mean) ** 2) / (2 * var) - log_scale - jnp.log(jnp.sqrt(2 * jnp.pi))
-
-
 @functools.partial(jax.jit, static_argnums=(4, 5, 6, 7))
 def compute_advantages(rewards, values, flags, last_value, gamma, gae, num_steps, num_envs):
     advantages = jnp.zeros((num_steps, num_envs))
@@ -100,8 +88,29 @@ def compute_advantages(rewards, values, flags, last_value, gamma, gae, num_steps
 
 
 @functools.partial(jax.jit, static_argnums=0)
-def policy_output(apply_fn, params, state):
-    return apply_fn(params, state)
+def policy_predict(apply_fn, params, state, key):
+    dist, value = apply_fn(params, state)
+    key, action_key = jax.random.split(key)
+    action = dist.sample(seed=action_key)
+    log_prob = dist.log_prob(action).sum(-1)
+
+    return action, log_prob, value, key
+
+
+@functools.partial(jax.jit, static_argnums=0)
+def policy_critic(apply_fn, params, state):
+    _, value = apply_fn(params, state)
+
+    return value
+
+
+@functools.partial(jax.jit, static_argnums=0)
+def policy_evaluate(apply_fn, params, states, actions):
+    dist, value = apply_fn(params, states)
+    log_probs = dist.log_prob(actions).sum(-1)
+    entropy = dist.entropy().sum(-1)
+
+    return log_probs, entropy, value
 
 
 @functools.partial(jax.jit, static_argnums=(2, 3, 4, 5, 6))
@@ -109,9 +118,7 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
     def loss_fn(params, batch):
         states, actions, old_log_probs, advantages, td_target = batch
 
-        action_mean, action_std, td_predict = policy_output(train_state.apply_fn, params, states)
-
-        log_probs = get_log_prob(action_mean, action_std, actions).sum(-1)
+        log_probs, entropy, td_predict = policy_evaluate(train_state.apply_fn, params, states, actions)
 
         ratios = jnp.exp(log_probs - old_log_probs)
 
@@ -120,9 +127,11 @@ def train_step(train_state, trajectories, num_minibatches, minibatch_size, value
 
         actor_loss = -jnp.minimum(surr1, surr2).mean()
         critic_loss = jnp.square(td_target - td_predict).mean()
-        entropy_loss = (0.5 + 0.5 * jnp.log(2 * jnp.pi) + jnp.log(action_std)).sum(-1).mean()
+        entropy_loss = entropy.mean()
 
-        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+        loss = actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+
+        return loss
 
     trajectories = jax.tree_util.tree_map(
         lambda x: x.reshape((num_minibatches, minibatch_size) + x.shape[1:]),
@@ -180,13 +189,14 @@ class ActorCriticNet(nn.Module):
             critic_output = nn.Dense(features=layer)(critic_output)
             critic_output = nn.tanh(critic_output)
 
-        action_mean = nn.Dense(features=self.action_dim)(actor_output)
-        action_std = nn.Dense(features=self.action_dim)(actor_output)
-        action_std = nn.sigmoid(action_std) + 1e-7
+        mean = nn.Dense(features=self.action_dim)(actor_output)
+        std = nn.sigmoid(nn.Dense(features=self.action_dim)(actor_output)) + 1e-7
+
+        distribution = Normal(loc=mean, scale=std)
 
         value = nn.Dense(features=1)(critic_output)
 
-        return action_mean, action_std, value.squeeze()
+        return distribution, value.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -226,11 +236,11 @@ def train(args, run_name, run_dir):
         numpy_rng = np.random.default_rng()
         state, _ = envs.reset()
 
-    key, subkey = jax.random.split(jax.random.PRNGKey(args.seed))
+    key, model_key = jax.random.split(jax.random.PRNGKey(args.seed))
 
     # Create policy network and optimizer
     policy_net = ActorCriticNet(action_dim=action_dim, actor_layers=args.actor_layers, critic_layers=args.critic_layers)
-    init_params = policy_net.init(subkey, state)
+    init_params = policy_net.init(model_key, state)
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_norm=args.clip_grad_norm),
@@ -243,7 +253,7 @@ def train(args, run_name, run_dir):
     rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape, action_shape)
 
     # Remove unnecessary variables
-    del action_dim, subkey, policy_net, init_params, optimizer
+    del action_dim, model_key, policy_net, init_params, optimizer
 
     global_step = 0
     log_episodic_returns, log_episodic_lengths = [], []
@@ -256,14 +266,10 @@ def train(args, run_name, run_dir):
             global_step += 1 * args.num_envs
 
             # Get action
-            action_mean, action_std, value = policy_output(train_state.apply_fn, train_state.params, state)
-            action, key = sample_action(action_mean, action_std, key)
-            log_prob = get_log_prob(action_mean, action_std, action).sum(-1)
-
-            action = np.array(action)
+            action, log_prob, value, key = policy_predict(train_state.apply_fn, train_state.params, state, key)
 
             # Perform action
-            next_state, reward, terminated, truncated, infos = envs.step(action)
+            next_state, reward, terminated, truncated, infos = envs.step(jax.device_get(action))
 
             # Store transition
             flag = 1.0 - np.logical_or(terminated, truncated)
@@ -287,7 +293,7 @@ def train(args, run_name, run_dir):
         # Get transition batch
         states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
 
-        _, _, last_value = policy_output(train_state.apply_fn, train_state.params, next_state)
+        last_value = policy_critic(train_state.apply_fn, train_state.params, next_state)
 
         # Calculate advantages and TD target
         advantages = compute_advantages(
