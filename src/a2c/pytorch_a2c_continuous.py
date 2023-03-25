@@ -143,9 +143,9 @@ class ActorCriticNet(nn.Module):
         return layers
 
     def forward(self, state):
-        action_mean = self.actor_net(state)
-        action_std = self.actor_logstd.expand_as(action_mean).exp()
-        distribution = Normal(action_mean, action_std)
+        mean = self.actor_net(state)
+        std = self.actor_logstd.expand_as(mean).exp()
+        distribution = Normal(mean, std)
 
         action = distribution.sample()
 
@@ -154,9 +154,9 @@ class ActorCriticNet(nn.Module):
         return action, critic_value
 
     def evaluate(self, states, actions):
-        action_mean = self.actor_net(states)
-        action_std = self.actor_logstd.expand_as(action_mean).exp()
-        distribution = Normal(action_mean, action_std)
+        mean = self.actor_net(states)
+        std = self.actor_logstd.expand_as(mean).exp()
+        distribution = Normal(mean, std)
 
         log_probs = distribution.log_prob(actions).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)

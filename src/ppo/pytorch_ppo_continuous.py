@@ -156,9 +156,9 @@ class ActorCriticNet(nn.Module):
 
     def forward(self, state):
         output = self.actor_net(state)
-        action_mean = self.actor_mean(output)
-        action_std = torch.sigmoid(self.actor_std(output)) + 1e-7
-        distribution = Normal(action_mean, action_std)
+        mean = self.actor_mean(output)
+        std = torch.sigmoid(self.actor_std(output)) + 1e-7
+        distribution = Normal(mean, std)
 
         action = distribution.sample()
         log_prob = distribution.log_prob(action).sum(-1)
@@ -169,9 +169,9 @@ class ActorCriticNet(nn.Module):
 
     def evaluate(self, states, actions):
         output = self.actor_net(states)
-        action_mean = self.actor_mean(output)
-        action_std = torch.sigmoid(self.actor_std(output)) + 1e-7
-        distribution = Normal(action_mean, action_std)
+        mean = self.actor_mean(output)
+        std = torch.sigmoid(self.actor_std(output)) + 1e-7
+        distribution = Normal(mean, std)
 
         log_probs = distribution.log_prob(actions).sum(-1)
         dist_entropy = distribution.entropy().sum(-1)
