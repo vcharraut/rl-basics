@@ -224,13 +224,8 @@ def train(args, run_name, run_dir):
     observation_shape = envs.single_observation_space.shape
     action_dim = envs.single_action_space.n
 
-    # Set seed for reproducibility
-    if args.seed:
-        numpy_rng = np.random.default_rng(args.seed)
-        state, _ = envs.reset(seed=args.seed)
-    else:
-        numpy_rng = np.random.default_rng()
-        state, _ = envs.reset()
+    # Initialize state
+    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
     key, model_key = jax.random.split(jax.random.PRNGKey(args.seed))
 
@@ -318,7 +313,8 @@ def train(args, run_name, run_dir):
 
         # Perform PPO update
         for _ in range(args.num_optims):
-            permutation = numpy_rng.permutation(args.batch_size)
+            key, subkey = jax.random.split(key)
+            permutation = jax.random.permutation(subkey, args.batch_size)
             batch = tuple(x[permutation] for x in batch)
 
             train_state, loss = train_step(
@@ -333,7 +329,7 @@ def train(args, run_name, run_dir):
 
         # Log training metrics
         writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-        writer.add_scalar("train/loss", np.asarray(loss), global_step)
+        writer.add_scalar("train/loss", jax.device_get(loss), global_step)
 
     # Close the environment
     envs.close()

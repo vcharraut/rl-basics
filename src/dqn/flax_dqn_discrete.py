@@ -224,7 +224,7 @@ def train(args, run_name, run_dir):
         else:
             # Intensification
             q_values = policy_output(train_state.apply_fn, train_state.params, state)
-            action = np.asarray(q_values.argmax(axis=1))
+            action = jax.device_get(q_values.argmax(axis=1))
 
         # Perform action
         next_state, reward, terminated, truncated, infos = env.step(action)
@@ -253,7 +253,7 @@ def train(args, run_name, run_dir):
                 train_state, loss = train_step(train_state, batch, args.gamma)
 
                 # Log training metrics
-                writer.add_scalar("train/loss", np.asarray(loss), global_step)
+                writer.add_scalar("train/loss", jax.device_get(loss), global_step)
 
             # Update target network
             if not global_step % args.target_update_frequency:

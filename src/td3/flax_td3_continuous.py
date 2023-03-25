@@ -243,8 +243,8 @@ def train(args, run_name, run_dir):
     action_low = env.single_action_space.low
     action_high = env.single_action_space.high
 
-    action_scale = np.array((env.action_space.high - env.action_space.low) / 2.0)
-    action_bias = np.array((env.action_space.high + env.action_space.low) / 2.0)
+    action_scale = (env.action_space.high - env.action_space.low) / 2.0
+    action_bias = (env.action_space.high + env.action_space.low) / 2.0
 
     # Set seed for reproducibility
     if args.seed:
@@ -387,11 +387,11 @@ def train(args, run_name, run_dir):
                     ),
                 )
 
-                writer.add_scalar("train/actor_loss", np.array(actor_loss), global_step)
+                writer.add_scalar("train/actor_loss", jax.device_get(actor_loss), global_step)
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
-            writer.add_scalar("train/critic_loss", np.array(critic_loss), global_step)
+            writer.add_scalar("train/critic_loss", jax.device_get(critic_loss), global_step)
 
     # Close the environment
     env.close()
