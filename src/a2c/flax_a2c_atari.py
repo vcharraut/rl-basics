@@ -10,6 +10,7 @@ import optax
 from flax import linen as nn
 from flax.training.train_state import TrainState
 from jax import numpy as jnp
+from tensorflow_probability.substrates.jax.distributions import Categorical
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
@@ -20,8 +21,9 @@ def parse_args():
     parser.add_argument("--total_timesteps", type=int, default=5_000_000)
     parser.add_argument("--num_envs", type=int, default=16)
     parser.add_argument("--num_steps", type=int, default=5)
-    parser.add_argument("--learning_rate", type=float, default=2.5e-4)
+    parser.add_argument("--learning_rate", type=float, default=7e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--gae", type=float, default=1.0)
     parser.add_argument("--value_coef", type=float, default=0.5)
     parser.add_argument("--entropy_coef", type=float, default=0.01)
     parser.add_argument("--clip_grad_norm", type=float, default=0.5)
@@ -64,39 +66,62 @@ def make_env(env_id, capture_video=False, run_dir="."):
     return thunk
 
 
-@jax.jit
-@functools.partial(jax.vmap, in_axes=(1, 1, None), out_axes=1)
-def compute_td_target(rewards, flags, gamma):
-    td_target = []
-    gain = 0.0
-    for i in reversed(range(len(rewards))):
-        gain = rewards[i] + gamma * flags[i] * gain
-        td_target.append(gain)
+@functools.partial(jax.jit, static_argnums=(4, 5, 6, 7))
+def compute_advantages(rewards, values, flags, last_value, gamma, gae, num_steps, num_envs):
+    advantages = jnp.zeros((num_steps, num_envs))
+    adv = jnp.zeros(num_envs)
 
-    td_target = td_target[::-1]
-    return jnp.array(td_target)
+    for i in reversed(range(num_steps)):
+        returns = rewards[i] + gamma * flags[i] * last_value
+        delta = returns - values[i]
+
+        adv = delta + gamma * gae * flags[i] * adv
+        advantages = advantages.at[i].set(adv)
+
+        last_value = values[i]
+
+    return advantages
 
 
 @functools.partial(jax.jit, static_argnums=0)
-def policy_output(apply_fn, params, state):
-    return apply_fn(params, state)
+def policy_predict(apply_fn, params, state, key):
+    dist, value = apply_fn(params, state)
+    key, action_key = jax.random.split(key)
+    action = dist.sample(seed=action_key)
+
+    return action, value, key
+
+
+@functools.partial(jax.jit, static_argnums=0)
+def policy_critic(apply_fn, params, state):
+    _, value = apply_fn(params, state)
+
+    return value
+
+
+@functools.partial(jax.jit, static_argnums=0)
+def policy_evaluate(apply_fn, params, states, actions):
+    dist, value = apply_fn(params, states)
+    log_probs = dist.log_prob(actions)
+    entropy = dist.entropy()
+
+    return log_probs, entropy, value
 
 
 @functools.partial(jax.jit, static_argnums=(2, 3))
 def train_step(train_state, batch, value_coef, entropy_coef):
     def loss_fn(params):
-        states, actions, td_target = batch
-        log_probs, td_predict = policy_output(train_state.apply_fn, params, states)
+        states, actions, advantages, td_target = batch
 
-        log_probs_by_actions = jax.vmap(lambda lp, a: lp[a])(log_probs, actions)
+        log_probs, entropy, td_predict = policy_evaluate(train_state.apply_fn, params, states, actions)
 
-        advantages = td_target - td_predict
+        actor_loss = (-log_probs * advantages).mean()
+        critic_loss = jnp.square(td_target - td_predict).mean()
+        entropy_loss = entropy.mean()
 
-        actor_loss = (-log_probs_by_actions * advantages).mean()
-        critic_loss = jnp.square(advantages).mean()
-        entropy_loss = -(log_probs * jnp.exp(log_probs)).sum(axis=-1).mean()
+        loss = actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
 
-        return actor_loss + critic_loss * value_coef - entropy_loss * entropy_coef
+        return loss
 
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(train_state.params)
@@ -111,20 +136,22 @@ class RolloutBuffer:
         self.actions = np.zeros((num_steps, num_envs), dtype=np.int64)
         self.rewards = np.zeros((num_steps, num_envs), dtype=np.float32)
         self.flags = np.zeros((num_steps, num_envs), dtype=np.float32)
+        self.values = np.zeros((num_steps, num_envs), dtype=np.float32)
 
         self.step = 0
         self.num_steps = num_steps
 
-    def push(self, state, action, reward, flag):
+    def push(self, state, action, reward, flag, value):
         self.states[self.step] = state
         self.actions[self.step] = action
         self.rewards[self.step] = reward
         self.flags[self.step] = flag
+        self.values[self.step] = value
 
         self.step = (self.step + 1) % self.num_steps
 
     def get(self):
-        return self.states, self.actions, self.rewards, self.flags
+        return self.states, self.actions, self.rewards, self.flags, self.values
 
 
 class ActorCriticNet(nn.Module):
@@ -143,11 +170,11 @@ class ActorCriticNet(nn.Module):
         output = nn.relu(output)
 
         logits = nn.Dense(features=self.action_dim)(output)
-        log_prob = nn.log_softmax(logits)
+        distribution = Categorical(logits=logits)
 
         value = nn.Dense(features=1)(output)
 
-        return log_prob, value.squeeze()
+        return distribution, value.squeeze()
 
 
 def train(args, run_name, run_dir):
@@ -178,19 +205,14 @@ def train(args, run_name, run_dir):
     observation_shape = envs.single_observation_space.shape
     action_dim = envs.single_action_space.n
 
-    # Set seed for reproducibility
-    if args.seed:
-        numpy_rng = np.random.default_rng(args.seed)
-        state, _ = envs.reset(seed=args.seed)
-    else:
-        numpy_rng = np.random.default_rng()
-        state, _ = envs.reset()
+    # Initialize environment(s)
+    state, _ = envs.reset(seed=args.seed) if args.seed else envs.reset()
 
-    key = jax.random.PRNGKey(args.seed)
+    key, model_key = jax.random.split(jax.random.PRNGKey(args.seed))
 
     # Create policy network and optimizer
     policy_net = ActorCriticNet(action_dim=action_dim)
-    init_params = policy_net.init(key, state)
+    init_params = policy_net.init(model_key, state)
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_norm=args.clip_grad_norm),
@@ -203,7 +225,7 @@ def train(args, run_name, run_dir):
     rollout_buffer = RolloutBuffer(args.num_steps, args.num_envs, observation_shape)
 
     # Remove unnecessary variables
-    del key, policy_net, init_params, optimizer
+    del policy_net, init_params, optimizer
 
     global_step = 0
     log_episodic_returns, log_episodic_lengths = [], []
@@ -216,16 +238,14 @@ def train(args, run_name, run_dir):
             global_step += 1 * args.num_envs
 
             # Get action
-            log_prob, _ = policy_output(train_state.apply_fn, train_state.params, state)
-            probs = np.exp(log_prob)
-            action = np.array([numpy_rng.choice(action_dim, p=probs[i]) for i in range(args.num_envs)])
+            action, value, key = policy_predict(train_state.apply_fn, train_state.params, state, key)
 
             # Perform action
-            next_state, reward, terminated, truncated, infos = envs.step(action)
+            next_state, reward, terminated, truncated, infos = envs.step(jax.device_get(action))
 
             # Store transition
             flag = 1.0 - np.logical_or(terminated, truncated)
-            rollout_buffer.push(state, action, reward, flag)
+            rollout_buffer.push(state, action, reward, flag, value)
 
             state = next_state
 
@@ -243,17 +263,35 @@ def train(args, run_name, run_dir):
                 writer.add_scalar("rollout/episodic_length", np.mean(log_episodic_lengths[-5:]), global_step)
 
         # Get transition batch
-        states, actions, rewards, flags = rollout_buffer.get()
+        states, actions, rewards, flags, values = rollout_buffer.get()
 
-        td_target = compute_td_target(rewards, flags, args.gamma)
+        last_value = policy_critic(train_state.apply_fn, train_state.params, next_state)
 
-        # Normalize td_target
-        td_target = (td_target - td_target.mean()) / (td_target.std() + 1e-8)
+        # Calculate advantages and TD target
+        advantages = compute_advantages(
+            rewards,
+            values,
+            flags,
+            last_value,
+            args.gamma,
+            args.gae,
+            args.num_steps,
+            args.num_envs,
+        )
+        td_target = advantages + values
 
-        # Create batch
-        batch = (states.reshape(-1, *observation_shape), actions.reshape(-1), td_target.reshape(-1))
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # Train
+        # Flatten batch
+        batch = (
+            states.reshape(-1, *observation_shape),
+            actions.reshape(-1),
+            advantages.reshape(-1),
+            td_target.reshape(-1),
+        )
+
+        # Perform A2C update
         train_state, loss = train_step(train_state, batch, args.value_coef, args.entropy_coef)
 
         # Log training metrics
