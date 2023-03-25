@@ -286,9 +286,9 @@ def train(args, run_name, run_dir):
 
         actor_loss = (-log_probs * advantages).mean()
         critic_loss = mse_loss(td_target, td_predict)
-        entropy_bonus = entropy.mean()
+        entropy_loss = entropy.mean()
 
-        loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
+        loss = actor_loss + critic_loss * args.value_coef - entropy_loss * args.entropy_coef
 
         # Update policy network
         optimizer.zero_grad()
