@@ -163,9 +163,9 @@ class ActorCriticNet(nn.Module):
         action = distribution.sample()
         log_prob = distribution.log_prob(action).sum(-1)
 
-        critic_value = self.critic_net(state).squeeze(-1)
+        value = self.critic_net(state).squeeze(-1)
 
-        return action, log_prob, critic_value
+        return action, log_prob, value
 
     def evaluate(self, states, actions):
         output = self.actor_net(states)
@@ -174,11 +174,11 @@ class ActorCriticNet(nn.Module):
         distribution = Normal(mean, std)
 
         log_probs = distribution.log_prob(actions).sum(-1)
-        dist_entropy = distribution.entropy().sum(-1)
+        entropy = distribution.entropy().sum(-1)
 
-        critic_values = self.critic_net(states).squeeze(-1)
+        values = self.critic_net(states).squeeze(-1)
 
-        return log_probs, critic_values, dist_entropy
+        return log_probs, values, entropy
 
     def critic(self, state):
         return self.critic_net(state).squeeze(-1)
@@ -308,7 +308,7 @@ def train(args, run_name, run_dir):
                 index = batch_indexes[start:end]
 
                 # Calculate new values from minibatch
-                _log_probs, td_predict, dist_entropy = policy.evaluate(states[index], actions[index])
+                _log_probs, td_predict, entropy = policy.evaluate(states[index], actions[index])
 
                 # Calculate ratios
                 logratio = _log_probs - log_probs[index]
@@ -327,7 +327,7 @@ def train(args, run_name, run_dir):
                 # Calculate losses
                 actor_loss = -torch.min(surr1, surr2).mean()
                 critic_loss = mse_loss(td_predict, td_target[index])
-                entropy_bonus = dist_entropy.mean()
+                entropy_bonus = entropy.mean()
 
                 loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 

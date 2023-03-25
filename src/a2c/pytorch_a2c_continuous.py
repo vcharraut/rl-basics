@@ -149,9 +149,9 @@ class ActorCriticNet(nn.Module):
 
         action = distribution.sample()
 
-        critic_value = self.critic_net(state).squeeze(-1)
+        value = self.critic_net(state).squeeze(-1)
 
-        return action, critic_value
+        return action, value
 
     def evaluate(self, states, actions):
         mean = self.actor_net(states)
@@ -159,11 +159,11 @@ class ActorCriticNet(nn.Module):
         distribution = Normal(mean, std)
 
         log_probs = distribution.log_prob(actions).sum(-1)
-        dist_entropy = distribution.entropy().sum(-1)
+        entropy = distribution.entropy().sum(-1)
 
-        critic_values = self.critic_net(states).squeeze(-1)
+        values = self.critic_net(states).squeeze(-1)
 
-        return log_probs, critic_values, dist_entropy
+        return log_probs, values, entropy
 
     def critic(self, state):
         return self.critic_net(state).squeeze(-1)
@@ -273,11 +273,11 @@ def train(args, run_name, run_dir):
         advantages = advantages.reshape(-1)
 
         # Compute losses
-        log_probs, td_predict, dist_entropy = policy.evaluate(states, actions)
+        log_probs, td_predict, entropy = policy.evaluate(states, actions)
 
         actor_loss = (-log_probs * advantages).mean()
         critic_loss = mse_loss(td_target, td_predict)
-        entropy_bonus = dist_entropy.mean()
+        entropy_bonus = entropy.mean()
 
         loss = actor_loss + critic_loss * args.value_coef - entropy_bonus * args.entropy_coef
 
