@@ -22,7 +22,6 @@ select = [
   "ICN",  # flake8-import-conventions
   "G",  # flake8-logging-format
   "PIE",  # flake8-pie
-  # "T20",  # flake8-print
   "PYI",  # flake8-pyi
   "SLF",  # flake8-self
   "SIM",  # flake8-simplify
