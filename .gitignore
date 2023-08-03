@@ -1,6 +1,5 @@
 # Folders
-.venv/
-.vscode/
+venv/
 runs/
 wandb/
 
