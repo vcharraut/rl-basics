@@ -10,7 +10,7 @@ from torch.distributions import Normal, Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-
+from pink import ColoredNoiseProcess # https://github.com/martius-lab/pink-noise-rl
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     parser.add_argument("--learning_start", type=int, default=25_000)
-    parser.add_argument("--policy_frequency", type=int, default=2)
+    parser.add_argument("--policy_frequency", type=int, default=1)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -99,7 +99,9 @@ class ActorCriticNet(nn.Module):
         super().__init__()
 
         observation_dim = np.prod(observation_shape)
-
+        self.action_dim = action_dim
+        self.gen = ColoredNoiseProcess(beta=1, size=(self.action_dim, 1000), rng=None)
+        
         self.actor_net = self._build_net(observation_shape, actor_layers)
         self.actor_mean = self._build_linear(actor_layers[-1], action_dim)
         self.actor_logstd = self._build_linear(actor_layers[-1], action_dim)
@@ -149,16 +151,23 @@ class ActorCriticNet(nn.Module):
         log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
         std = log_std.exp()
 
-        # Sample action using reparameterization trick.
-        normal = Normal(mean, std)
-        x_t = normal.rsample()
+        # Generate action from pink Noise distrib
+        distribution = Normal(mean, std)
+        cn_sample = torch.tensor(self.gen.sample()).float()
+        x_t = distribution.mean + distribution.stddev*cn_sample
         y_t = torch.tanh(x_t)
+      
+        # Generate action 
+        # normal = Normal(mean, std)
+        # x_t = normal.rsample()
+        # y_t = torch.tanh(x_t)
+
 
         # Rescale and shift the action.
         action = y_t * self.action_scale + self.action_bias
 
         # Calculate the log probability of the sampled action.
-        log_prob = normal.log_prob(x_t)
+        log_prob = distribution.log_prob(x_t)
 
         # Enforce action bounds.
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
@@ -310,24 +319,24 @@ def train(args, run_name, run_dir):
             optimizer_critic.step()
 
             # Update actor
-            if not global_step % args.policy_frequency:
-                for _ in range(args.policy_frequency):
-                    pi, log_pi = policy.actor(states)
-                    qf1_pi, qf2_pi = policy.critic(states, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                    actor_loss = (alpha * log_pi - min_qf_pi).mean()
+            # if not global_step % args.policy_frequency:
+            for _ in range(args.policy_frequency):
+                pi, log_pi = policy.actor(states)
+                qf1_pi, qf2_pi = policy.critic(states, pi)
+                min_qf_pi = torch.min(qf1_pi, qf2_pi)
+                actor_loss = (alpha * log_pi - min_qf_pi).mean()
 
-                    optimizer_actor.zero_grad()
-                    actor_loss.backward()
-                    optimizer_actor.step()
+                optimizer_actor.zero_grad()
+                actor_loss.backward()
+                optimizer_actor.step()
 
-                writer.add_scalar("train/actor_loss", actor_loss, global_step)
+            writer.add_scalar("train/actor_loss", actor_loss, global_step)
 
-                # Update the target network (soft update)
-                for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+            # Update the target network (soft update)
+            for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+            for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
@@ -411,7 +420,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch_PiFreq2_std_Valou"
+    run_name = "SAC_PyTorch_PinkNoise_Pifreq1"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")

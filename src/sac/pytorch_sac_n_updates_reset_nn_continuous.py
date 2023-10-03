@@ -11,21 +11,20 @@ from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_id", type=str, default="HalfCheetah-v4")
     parser.add_argument("--total_timesteps", type=int, default=800_000)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--buffer_size", type=int, default=100_000)
+    parser.add_argument("--buffer_size", type=int, default=50_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--learning_start", type=int, default=25_000)
-    parser.add_argument("--policy_frequency", type=int, default=2)
+    parser.add_argument("--learning_start", type=int, default=10000)
+    parser.add_argument("--policy_frequency", type=int, default=8)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -310,24 +309,71 @@ def train(args, run_name, run_dir):
             optimizer_critic.step()
 
             # Update actor
-            if not global_step % args.policy_frequency:
-                for _ in range(args.policy_frequency):
-                    pi, log_pi = policy.actor(states)
-                    qf1_pi, qf2_pi = policy.critic(states, pi)
-                    min_qf_pi = torch.min(qf1_pi, qf2_pi)
-                    actor_loss = (alpha * log_pi - min_qf_pi).mean()
+            for _ in range(args.policy_frequency):
+                pi, log_pi = policy.actor(states)
+                qf1_pi, qf2_pi = policy.critic(states, pi)
+                min_qf_pi = torch.min(qf1_pi, qf2_pi)
+                actor_loss = (alpha * log_pi - min_qf_pi).mean()
 
-                    optimizer_actor.zero_grad()
-                    actor_loss.backward()
-                    optimizer_actor.step()
+                optimizer_actor.zero_grad()
+                actor_loss.backward()
+                optimizer_actor.step()
 
-                writer.add_scalar("train/actor_loss", actor_loss, global_step)
+            writer.add_scalar("train/actor_loss", actor_loss, global_step)
 
-                # Update the target network (soft update)
-                for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-                for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
-                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+            # Update the target network (soft update)
+            for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+            for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
+                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+
+            
+            # Reset w&b last hidden layer - reset last layer of two critics, policy_net and targets
+            if global_step % 100000 == 0 and global_step < 700000:
+
+                # Policy & target policy last layer
+                x = torch.empty(policy.actor_net[2].weight.shape)
+                policy.actor_net[2].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(policy.actor_net[2].bias.shape)
+                policy.actor_net[2].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                x = torch.empty(target.actor_net[2].weight.shape)
+                target.actor_net[2].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(target.actor_net[2].bias.shape)
+                target.actor_net[2].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                # Actor mean & actor std
+                x = torch.empty(policy.actor_mean.weight.shape)
+                policy.actor_mean.weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(policy.actor_mean.bias.shape)
+                policy.actor_mean.bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                x = torch.empty(policy.actor_logstd.weight.shape)
+                policy.actor_logstd.weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(policy.actor_logstd.bias.shape)
+                policy.actor_logstd.bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                # 2 critics & 2 target critics last layers 
+                x = torch.empty(policy.critic_net1[4].weight.shape)
+                policy.critic_net1[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(policy.critic_net1[4].bias.shape)
+                policy.critic_net1[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                x = torch.empty(policy.critic_net2[4].weight.shape)
+                policy.critic_net2[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(policy.critic_net2[4].bias.shape)
+                policy.critic_net2[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                x = torch.empty(target.critic_net1[4].weight.shape)
+                target.critic_net1[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(target.critic_net1[4].bias.shape)
+                target.critic_net1[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+                x = torch.empty(target.critic_net2[4].weight.shape)
+                target.critic_net2[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                x = torch.empty(target.critic_net2[4].bias.shape)
+                target.critic_net2[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
 
             # Log training metrics
             writer.add_scalar("rollout/SPS", int(global_step / (time.process_time() - start_time)), global_step)
@@ -411,7 +457,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch_PiFreq2_std_Valou"
+    run_name = "SAC_PyTorch_SR2"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
