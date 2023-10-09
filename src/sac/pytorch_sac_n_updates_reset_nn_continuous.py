@@ -18,13 +18,14 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--buffer_size", type=int, default=50_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
-    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256, 256, 256])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--learning_start", type=int, default=10000)
-    parser.add_argument("--policy_frequency", type=int, default=8)
+    parser.add_argument("--learning_start", type=int, default=25_000)
+    parser.add_argument("--policy_frequency", type=int, default=2)
+    parser.add_argument("--reset_frequency", type=int, default=100_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -56,6 +57,52 @@ def make_env(env_id, capture_video=False, run_dir="."):
 
     return thunk
 
+def reset_nns(policy, target, seed, std=np.sqrt(2), bias_const=0.0):
+
+    # Seed manual for same weights & bias as init 
+    torch.manual_seed(seed)
+
+    # Policy & target policy last layer
+    #x = torch.empty(policy.actor_net[2].weight.shape)
+    #policy.actor_net[2].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+    #x = torch.empty(policy.actor_net[2].bias.shape)
+    #policy.actor_net[2].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+
+    torch.nn.init.orthogonal_(policy.actor_net[4].weight, std)
+    torch.nn.init.constant_(policy.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.actor_net[6].weight, std)
+    torch.nn.init.constant_(policy.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.actor_net[4].weight, std)
+    torch.nn.init.constant_(target.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.actor_net[6].weight, std)
+    torch.nn.init.constant_(target.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_mean.weight, std)
+    torch.nn.init.constant_(policy.actor_mean.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_logstd.weight, std)
+    torch.nn.init.constant_(policy.actor_logstd.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net1[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net1[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net2[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net2[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net1[4].weight, std)
+    torch.nn.init.constant_(target.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net1[6].weight, std)
+    torch.nn.init.constant_(target.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net2[4].weight, std)
+    torch.nn.init.constant_(target.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net2[6].weight, std)
+    torch.nn.init.constant_(target.critic_net2[6].bias, bias_const)
 
 class ReplayBuffer:
     def __init__(self, buffer_size, batch_size, observation_shape, action_shape, numpy_rng, device):
@@ -116,7 +163,7 @@ class ActorCriticNet(nn.Module):
         if device.type == "cuda":
             self.cuda()
 
-    def _build_linear(self, in_size, out_size, apply_init=False, std=np.sqrt(2), bias_const=0.0):
+    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
         layer = nn.Linear(in_size, out_size)
 
         if apply_init:
@@ -259,6 +306,9 @@ def train(args, run_name, run_dir):
     log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
 
+    # Init frequency update
+    init_policy_frequency = args.policy_frequency
+
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
         if global_step < args.learning_start:
@@ -289,27 +339,39 @@ def train(args, run_name, run_dir):
 
         # Perform training step
         if global_step > args.learning_start:
-            # Sample a batch from the replay buffer
-            states, actions, rewards, next_states, flags = replay_buffer.sample()
-
-            # Update critic
-            with torch.no_grad():
-                next_state_actions, next_state_log_pi = policy.actor(next_states)
-                critic1_next_target, critic2_next_target = target.critic(next_states, next_state_actions)
-                min_qf_next_target = torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
-                next_q_value = rewards + args.gamma * flags * min_qf_next_target
-
-            qf1_a_values, qf2_a_values = policy.critic(states, actions)
-            qf1_loss = mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = mse_loss(qf2_a_values, next_q_value)
-            critic_loss = qf1_loss + qf2_loss
-
-            optimizer_critic.zero_grad()
-            critic_loss.backward()
-            optimizer_critic.step()
-
-            # Update actor
             for _ in range(args.policy_frequency):
+
+                # Do the reset some times
+                time_to_reset = not (global_step % args.reset_frequency) and global_step <= 700000
+                if time_to_reset:
+                    # Reset all weights layers 
+                    reset_nns(policy, target, args.seed)
+
+                    # Update policy frequency for a time to reset update only, else usual gradient steps 
+                    args.policy_frequency = init_policy_frequency*8
+
+                else:
+                    args.policy_frequency = init_policy_frequency
+                # Sample a batch from the replay buffer
+                states, actions, rewards, next_states, flags = replay_buffer.sample()
+
+                # Update critic
+                with torch.no_grad():
+                    next_state_actions, next_state_log_pi = policy.actor(next_states)
+                    critic1_next_target, critic2_next_target = target.critic(next_states, next_state_actions)
+                    min_qf_next_target = torch.min(critic1_next_target, critic2_next_target) - alpha * next_state_log_pi
+                    next_q_value = rewards + args.gamma * flags * min_qf_next_target
+
+                qf1_a_values, qf2_a_values = policy.critic(states, actions)
+                qf1_loss = mse_loss(qf1_a_values, next_q_value)
+                qf2_loss = mse_loss(qf2_a_values, next_q_value)
+                critic_loss = qf1_loss + qf2_loss
+
+                optimizer_critic.zero_grad()
+                critic_loss.backward()
+                optimizer_critic.step()
+
+                # Update actor
                 pi, log_pi = policy.actor(states)
                 qf1_pi, qf2_pi = policy.critic(states, pi)
                 min_qf_pi = torch.min(qf1_pi, qf2_pi)
@@ -319,60 +381,13 @@ def train(args, run_name, run_dir):
                 actor_loss.backward()
                 optimizer_actor.step()
 
-            writer.add_scalar("train/actor_loss", actor_loss, global_step)
+                writer.add_scalar("train/actor_loss", actor_loss, global_step)
 
-            # Update the target network (soft update)
-            for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
-                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-            for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
-                target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
-
-            
-            # Reset w&b last hidden layer - reset last layer of two critics, policy_net and targets
-            if global_step % 100000 == 0 and global_step < 700000:
-
-                # Policy & target policy last layer
-                x = torch.empty(policy.actor_net[2].weight.shape)
-                policy.actor_net[2].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(policy.actor_net[2].bias.shape)
-                policy.actor_net[2].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                x = torch.empty(target.actor_net[2].weight.shape)
-                target.actor_net[2].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(target.actor_net[2].bias.shape)
-                target.actor_net[2].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                # Actor mean & actor std
-                x = torch.empty(policy.actor_mean.weight.shape)
-                policy.actor_mean.weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(policy.actor_mean.bias.shape)
-                policy.actor_mean.bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                x = torch.empty(policy.actor_logstd.weight.shape)
-                policy.actor_logstd.weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(policy.actor_logstd.bias.shape)
-                policy.actor_logstd.bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                # 2 critics & 2 target critics last layers 
-                x = torch.empty(policy.critic_net1[4].weight.shape)
-                policy.critic_net1[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(policy.critic_net1[4].bias.shape)
-                policy.critic_net1[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                x = torch.empty(policy.critic_net2[4].weight.shape)
-                policy.critic_net2[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(policy.critic_net2[4].bias.shape)
-                policy.critic_net2[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                x = torch.empty(target.critic_net1[4].weight.shape)
-                target.critic_net1[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(target.critic_net1[4].bias.shape)
-                target.critic_net1[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-
-                x = torch.empty(target.critic_net2[4].weight.shape)
-                target.critic_net2[4].weight = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
-                x = torch.empty(target.critic_net2[4].bias.shape)
-                target.critic_net2[4].bias = torch.nn.Parameter(torch.nn.init.normal_(x, 0, 0.01).cuda())
+                # Update the target network (soft update)
+                for param, target_param in zip(policy.critic_net1.parameters(), target.critic_net1.parameters()):
+                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
+                for param, target_param in zip(policy.critic_net2.parameters(), target.critic_net2.parameters()):
+                    target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
 
             # Log training metrics
@@ -457,15 +472,16 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch_SR2"
+    run_name = "SAC_PyTorch_SR4_100k"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
-    print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
-    print(f"Results will be saved to: {run_dir}")
-    mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
-    print(f"Training - Mean returns achieved: {mean_train_return}.")
+    # print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
+    # print(f"Results will be saved to: {run_dir}")
+    # mean_train_return = train(args=args_, run_name=run_name, run_dir=run_dir)
+    # print(f"Training - Mean returns achieved: {mean_train_return}.")
 
-    if args_.capture_video:
+    #if args_.capture_video:
+    if True:
         print(f"Evaluating and capturing videos of {run_name} on {args_.env_id}.")
         mean_eval_return = eval_and_render(args=args_, run_dir=run_dir)
         print(f"Evaluation - Mean returns achieved: {mean_eval_return}.")

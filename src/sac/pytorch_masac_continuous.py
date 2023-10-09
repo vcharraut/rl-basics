@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--learning_start", type=int, default=25_000)
     parser.add_argument("--policy_frequency", type=int, default=2)
     parser.add_argument("--cpu", action="store_true")
@@ -242,7 +242,7 @@ def train(args, run_name, run_dir):
         lr=args.learning_rate,
     )
 
-    alpha = args.alpha
+    alpha_dist = Uniform(0, args.alpha)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(
@@ -290,10 +290,11 @@ def train(args, run_name, run_dir):
 
         # Perform training step
         if global_step > args.learning_start:
-
             for _ in range(args.policy_frequency):
                 # Sample a batch from the replay buffer
                 states, actions, rewards, next_states, flags = replay_buffer.sample()
+
+                alpha = alpha_dist.sample()
 
                 # Update critic
                 with torch.no_grad():
@@ -311,7 +312,7 @@ def train(args, run_name, run_dir):
                 critic_loss.backward()
                 optimizer_critic.step()
 
-                # Update actor  
+                # Update actor
                 pi, log_pi = policy.actor(states)
                 qf1_pi, qf2_pi = policy.critic(states, pi)
                 min_qf_pi = torch.min(qf1_pi, qf2_pi)
@@ -340,6 +341,7 @@ def train(args, run_name, run_dir):
             writer.add_scalar("train/qf2_loss", qf2_loss, global_step)
             writer.add_scalar("train/min_qf_next_target", min_qf_next_target.mean(), global_step)
             writer.add_scalar("train/next_q_value", next_q_value.mean(), global_step)
+            writer.add_scalar("train/ent_coef", alpha, global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
@@ -411,7 +413,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch_base"
+    run_name = "SAC_PyTorch_new_base_MAS05"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")

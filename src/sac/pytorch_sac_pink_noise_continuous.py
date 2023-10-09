@@ -19,13 +19,13 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
-    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256])
-    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256])
+    parser.add_argument("--actor_layers", nargs="+", type=int, default=[256, 256, 256, 256])
+    parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
     parser.add_argument("--learning_start", type=int, default=25_000)
-    parser.add_argument("--policy_frequency", type=int, default=1)
+    parser.add_argument("--policy_frequency", type=int, default=2)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -56,6 +56,47 @@ def make_env(env_id, capture_video=False, run_dir="."):
         return env
 
     return thunk
+
+def reset_nns(policy, target, seed, std=np.sqrt(2), bias_const=0.0):
+    
+    # Seed manual for same weights & bias as init 
+    torch.manual_seed(seed)
+
+    torch.nn.init.orthogonal_(policy.actor_net[4].weight, std)
+    torch.nn.init.constant_(policy.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.actor_net[6].weight, std)
+    torch.nn.init.constant_(policy.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.actor_net[4].weight, std)
+    torch.nn.init.constant_(target.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.actor_net[6].weight, std)
+    torch.nn.init.constant_(target.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_mean.weight, std)
+    torch.nn.init.constant_(policy.actor_mean.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_logstd.weight, std)
+    torch.nn.init.constant_(policy.actor_logstd.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net1[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net1[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net2[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net2[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net1[4].weight, std)
+    torch.nn.init.constant_(target.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net1[6].weight, std)
+    torch.nn.init.constant_(target.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net2[4].weight, std)
+    torch.nn.init.constant_(target.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net2[6].weight, std)
+    torch.nn.init.constant_(target.critic_net2[6].bias, bias_const)
 
 
 class ReplayBuffer:
