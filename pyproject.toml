@@ -34,7 +34,7 @@ select = [
 ]
 show-fixes = true
 show-source = true
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.isort]
 lines-after-imports = 2

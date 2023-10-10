@@ -1,8 +1,8 @@
 import argparse
 import functools
+from collections.abc import Sequence
 from datetime import datetime
 from time import perf_counter
-from typing import Sequence
 
 import flax
 import gymnasium as gym
