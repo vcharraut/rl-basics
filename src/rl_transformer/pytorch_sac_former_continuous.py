@@ -137,6 +137,11 @@ class ActorCriticNet(nn.Module):
 
         return layers
 
+    def _build_former_net():
+        return layers
+    
+    
+
     def actor(self, state):
         log_std_max = 2
         log_std_min = -5

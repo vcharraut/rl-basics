@@ -10,7 +10,7 @@ from torch.distributions import Normal, Uniform
 from torch.nn.functional import mse_loss
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-
+from pink import ColoredNoiseProcess # https://github.com/martius-lab/pink-noise-rl
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -23,9 +23,10 @@ def parse_args():
     parser.add_argument("--critic_layers", nargs="+", type=int, default=[256, 256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.4)
     parser.add_argument("--learning_start", type=int, default=25_000)
     parser.add_argument("--policy_frequency", type=int, default=2)
+    parser.add_argument("--reset_frequency", type=int, default=100_000)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--capture_video", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -56,6 +57,47 @@ def make_env(env_id, capture_video=False, run_dir="."):
         return env
 
     return thunk
+
+def reset_nns(policy, target, seed, std=np.sqrt(2), bias_const=0.0):
+    
+    # Seed manual for same weights & bias as init 
+    torch.manual_seed(seed)
+
+    torch.nn.init.orthogonal_(policy.actor_net[4].weight, std)
+    torch.nn.init.constant_(policy.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.actor_net[6].weight, std)
+    torch.nn.init.constant_(policy.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.actor_net[4].weight, std)
+    torch.nn.init.constant_(target.actor_net[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.actor_net[6].weight, std)
+    torch.nn.init.constant_(target.actor_net[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_mean.weight, std)
+    torch.nn.init.constant_(policy.actor_mean.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.actor_logstd.weight, std)
+    torch.nn.init.constant_(policy.actor_logstd.bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net1[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net1[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(policy.critic_net2[4].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(policy.critic_net2[6].weight, std)
+    torch.nn.init.constant_(policy.critic_net2[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net1[4].weight, std)
+    torch.nn.init.constant_(target.critic_net1[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net1[6].weight, std)
+    torch.nn.init.constant_(target.critic_net1[6].bias, bias_const)
+
+    torch.nn.init.orthogonal_(target.critic_net2[4].weight, std)
+    torch.nn.init.constant_(target.critic_net2[4].bias, bias_const)
+    torch.nn.init.orthogonal_(target.critic_net2[6].weight, std)
+    torch.nn.init.constant_(target.critic_net2[6].bias, bias_const)
 
 
 class ReplayBuffer:
@@ -99,7 +141,9 @@ class ActorCriticNet(nn.Module):
         super().__init__()
 
         observation_dim = np.prod(observation_shape)
-
+        self.action_dim = action_dim
+        self.gen = ColoredNoiseProcess(beta=1, size=(self.action_dim, 1000), rng=None)
+        
         self.actor_net = self._build_net(observation_shape, actor_layers)
         self.actor_mean = self._build_linear(actor_layers[-1], action_dim)
         self.actor_logstd = self._build_linear(actor_layers[-1], action_dim)
@@ -117,7 +161,7 @@ class ActorCriticNet(nn.Module):
         if device.type == "cuda":
             self.cuda()
 
-    def _build_linear(self, in_size, out_size, apply_init=True, std=np.sqrt(2), bias_const=0.0):
+    def _build_linear(self, in_size, out_size, apply_init=False, std=np.sqrt(2), bias_const=0.0):
         layer = nn.Linear(in_size, out_size)
 
         if apply_init:
@@ -149,16 +193,22 @@ class ActorCriticNet(nn.Module):
         log_std = log_std_min + 0.5 * (log_std_max - log_std_min) * (log_std + 1)
         std = log_std.exp()
 
-        # Sample action using reparameterization trick.
-        normal = Normal(mean, std)
-        x_t = normal.rsample()
+        # Generate action from pink Noise distrib
+        # distribution = Normal(mean, std)
+        # cn_sample = torch.tensor(self.gen.sample()).float()
+        # x_t = distribution.mean + distribution.stddev*cn_sample
+        # y_t = torch.tanh(x_t)
+      
+        # Generate action 
+        distribution = Normal(mean, std)
+        x_t = distribution.rsample()
         y_t = torch.tanh(x_t)
 
         # Rescale and shift the action.
         action = y_t * self.action_scale + self.action_bias
 
         # Calculate the log probability of the sampled action.
-        log_prob = normal.log_prob(x_t)
+        log_prob = distribution.log_prob(x_t)
 
         # Enforce action bounds.
         log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
@@ -242,7 +292,7 @@ def train(args, run_name, run_dir):
         lr=args.learning_rate,
     )
 
-    alpha = args.alpha
+    alpha_dist = Uniform(0, args.alpha)
 
     # Create the replay buffer
     replay_buffer = ReplayBuffer(
@@ -259,6 +309,9 @@ def train(args, run_name, run_dir):
 
     log_episodic_returns, log_episodic_lengths = [], []
     start_time = time.process_time()
+
+    # Init frequency update
+    init_policy_frequency = args.policy_frequency
 
     # Main loop
     for global_step in tqdm(range(args.total_timesteps)):
@@ -289,11 +342,24 @@ def train(args, run_name, run_dir):
             writer.add_scalar("rollout/episodic_length", np.mean(info["episode"]["l"][-5:]), global_step)
 
         # Perform training step
-        if global_step > args.learning_start:
 
+        # Do the reset some times
+        time_to_reset = not (global_step % args.reset_frequency) and global_step < 700000
+        if time_to_reset:
+            # Reset all weights layers 
+            reset_nns(policy, target, args.seed)
+
+            # Update policy frequency for a time to reset update only, else usual gradient steps 
+            args.policy_frequency = init_policy_frequency*2
+
+        if global_step > args.learning_start:
             for _ in range(args.policy_frequency):
                 # Sample a batch from the replay buffer
                 states, actions, rewards, next_states, flags = replay_buffer.sample()
+
+                alpha = alpha_dist.sample()
+                if time_to_reset:
+                    alpha = 0
 
                 # Update critic
                 with torch.no_grad():
@@ -311,7 +377,7 @@ def train(args, run_name, run_dir):
                 critic_loss.backward()
                 optimizer_critic.step()
 
-                # Update actor  
+                # Update actor
                 pi, log_pi = policy.actor(states)
                 qf1_pi, qf2_pi = policy.critic(states, pi)
                 min_qf_pi = torch.min(qf1_pi, qf2_pi)
@@ -340,6 +406,7 @@ def train(args, run_name, run_dir):
             writer.add_scalar("train/qf2_loss", qf2_loss, global_step)
             writer.add_scalar("train/min_qf_next_target", min_qf_next_target.mean(), global_step)
             writer.add_scalar("train/next_q_value", next_q_value.mean(), global_step)
+            writer.add_scalar("train/ent_coef", alpha, global_step)
 
     # Save final policy
     torch.save(policy.state_dict(), f"{run_dir}/policy.pt")
@@ -411,7 +478,7 @@ if __name__ == "__main__":
 
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
-    run_name = "SAC_PyTorch_base"
+    run_name = "SAC_PyTorch_Armageddon"
     run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
