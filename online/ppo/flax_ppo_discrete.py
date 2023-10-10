@@ -345,7 +345,7 @@ if __name__ == "__main__":
     # Create run directory
     run_time = str(datetime.now().strftime("%d-%m_%H:%M:%S"))
     run_name = "PPO_Flax"
-    run_dir = f"runs/{args_.env_id}__{run_name}__{run_time}"
+    run_dir = f"logs/{args_.env_id}__{run_name}__{run_time}"
 
     print(f"Commencing training of {run_name} on {args_.env_id} for {args_.total_timesteps} timesteps.")
     print(f"Results will be saved to: {run_dir}")

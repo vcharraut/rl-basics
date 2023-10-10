@@ -1,6 +1,6 @@
 # Folders
 venv/
-runs/
+logs/
 wandb/
 
 # Files
