@@ -1,5 +1,5 @@
-import gymnasium as gym
-import minari
+import gym
+import d4rl
 import numpy as np
 import torch
 import torch.nn as nn
@@ -48,12 +48,12 @@ class PolicyNetwork(nn.Module):
 
 
 if __name__ == "__main__":
-    minari_dataset = minari.load_dataset("HalfCheetah-expert-v4")
-    dataloader = DataLoader(minari_dataset, batch_size=256, shuffle=True, collate_fn=collate_fn)
+    env = gym.make('maze2d-umaze-v1')
+    dataset = env.get_dataset()
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
 
     torch.manual_seed(42)
 
-    env = minari_dataset.recover_environment()
     observation_space = env.observation_space
     action_space = env.action_space
 
@@ -75,24 +75,24 @@ if __name__ == "__main__":
 
         print(f"Epoch: {epoch}/{num_epochs}, Loss: {loss.item()}")
 
-    env = gym.make("HalfCheetah-v4")
+    # env = gym.make("HalfCheetah-v4")
 
-    obs, _ = env.reset(seed=42)
-    rewards_bc = []
+    # obs, _ = env.reset(seed=42)
+    # rewards_bc = []
 
-    for _ in range(100):
-        obs, _ = env.reset()
-        accumulated_rew = 0
-        done = False
+    # for _ in range(100):
+    #     obs, _ = env.reset()
+    #     accumulated_rew = 0
+    #     done = False
 
-        while not done:
-            action = policy_net(torch.Tensor(obs).float()).detach().numpy()
-            obs, rew, ter, tru, _ = env.step(action)
-            done = ter or tru
-            accumulated_rew += rew
+    #     while not done:
+    #         action = policy_net(torch.Tensor(obs).float()).detach().numpy()
+    #         obs, rew, ter, tru, _ = env.step(action)
+    #         done = ter or tru
+    #         accumulated_rew += rew
 
-        rewards_bc.append(accumulated_rew)
+    #     rewards_bc.append(accumulated_rew)
 
-    env.close()
+    # env.close()
 
-    print(f"Mean rewards: {np.mean(rewards_bc)}")
+    # print(f"Mean rewards: {np.mean(rewards_bc)}")

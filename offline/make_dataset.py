@@ -14,6 +14,6 @@ if __name__ == "__main__":
     model.learn(total_timesteps=1_000_000, progress_bar=True)
 
     dataset = create_dataset_from_collector_env(
-        dataset_id="HalfCheetah-medium-v4",
+        dataset_id="HalfCheetah-expert-v4",
         collector_env=env,
     )
