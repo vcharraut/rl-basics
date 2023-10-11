@@ -1,5 +1,6 @@
 gymnasium[all]
 gymnasium[accept-rom-license]
+minari
 numpy
 torch
 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
